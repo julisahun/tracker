@@ -1,0 +1,160 @@
+@import "tailwindcss";
+
+/* Drive `dark:` utilities from a `.dark` class on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- Semantic theme tokens -------------------------------------------- */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --raised: #eef0f4;
+  --line: #e5e7eb;
+  --fg: #1a1d24;
+  --muted: #6b7280;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-fg: #ffffff;
+  --accent-soft: #ecedfe;
+  --accent-soft-fg: #4338ca;
+  --danger: #dc2626;
+  --danger-soft: #fee2e2;
+}
+
+.dark {
+  --bg: #0c0e13;
+  --surface: #14171d;
+  --raised: #1d212a;
+  --line: #282d38;
+  --fg: #e7e9ee;
+  --muted: #99a1b3;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --accent-fg: #ffffff;
+  --accent-soft: color-mix(in srgb, #6366f1 18%, transparent);
+  --accent-soft-fg: #b4baff;
+  --danger: #f87171;
+  --danger-soft: color-mix(in srgb, #f87171 16%, transparent);
+}
+
+/* Expose tokens as Tailwind color utilities (bg-surface, text-muted, …). */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-fg: var(--accent-soft-fg);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+}
+
+/* ---- Base ------------------------------------------------------------- */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Thin, themed scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: content-box;
+}
+
+/* ---- Editor prose ----------------------------------------------------- */
+.tracker-prose {
+  color: var(--fg);
+  line-height: 1.7;
+  font-size: 1rem;
+}
+.tracker-prose > * + * {
+  margin-top: 0.85rem;
+}
+.tracker-prose h1 {
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.tracker-prose h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.tracker-prose h3 {
+  font-size: 1.12rem;
+  font-weight: 600;
+}
+.tracker-prose ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+.tracker-prose ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+}
+.tracker-prose blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1rem;
+  color: var(--muted);
+  font-style: italic;
+}
+.tracker-prose code {
+  background: var(--raised);
+  border-radius: 0.3rem;
+  padding: 0.12rem 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+}
+.tracker-prose pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  overflow-x: auto;
+}
+.tracker-prose pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+.tracker-prose a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tracker-prose p.is-editor-empty:first-child::before {
+  content: "Write notes, or insert a table…";
+  color: var(--muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

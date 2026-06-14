@@ -1,0 +1,26 @@
+{
+  "fields": [
+    {
+      "key": "name",
+      "label": "Name",
+      "type": "text"
+    },
+    {
+      "key": "nQuestions",
+      "label": "Total questions",
+      "type": "number",
+      "default": "0"
+    },
+    {
+      "key": "answeredQuestions",
+      "label": "Questions answered",
+      "type": "number",
+      "default": "0"
+    },
+    {
+      "key": "schemaDone",
+      "label": "Schema done",
+      "type": "boolean"
+    }
+  ]
+}

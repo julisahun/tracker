@@ -1,0 +1,34 @@
+{
+  "metrics": [
+    {
+      "id": "7467751e-d33d-4526-b51f-e69ab27e1f42",
+      "title": "Preguntes totals",
+      "field": "nQuestions",
+      "kind": "aggregate",
+      "agg": "sum"
+    },
+    {
+      "id": "1a4571e4-df94-4fe0-a86c-cfebde1ea8bb",
+      "title": "Preguntes respostes",
+      "field": "answeredQuestions",
+      "kind": "aggregate",
+      "agg": "sum"
+    },
+    {
+      "id": "af279d39-99e5-451b-9399-804f650850bb",
+      "title": "% de preguntes respostes",
+      "field": "name",
+      "kind": "ratio",
+      "ratioNumerator": "answeredQuestions",
+      "ratioDenominator": "nQuestions"
+    },
+    {
+      "id": "89153dbd-c107-4504-9ba9-62d83bf5842c",
+      "title": "% de esquemes fets",
+      "field": "schemaDone",
+      "kind": "ratio",
+      "ratioNumerator": "schemaDone",
+      "ratioDenominator": "1"
+    }
+  ]
+}

@@ -1,0 +1,286 @@
+import { create } from "zustand";
+import {
+  pickRootDirectory,
+  verifyPermission,
+  hasPermission,
+  buildTree,
+  writeFile,
+  createFile,
+  createDirectory,
+  deleteEntry,
+  type TreeNode,
+} from "../fs/directory";
+import { saveRootHandle, loadRootHandle } from "../fs/handleStore";
+import { buildSearchIndex, type SearchIndex } from "../search/searchIndex";
+import { stringifyFrontmatter, type Frontmatter } from "../format/frontmatter";
+import {
+  ensureSchema,
+  saveSchema,
+  templateFrontmatter,
+  normalizeFrontmatter,
+  defaultSchema,
+  type Schema,
+} from "../schema/schema";
+import {
+  ensureDashboard,
+  saveDashboard,
+  emptyDashboard,
+  type Dashboard,
+} from "../dashboard/dashboard";
+
+export type FolderStatus =
+  | "unsupported" // browser lacks the File System Access API
+  | "empty" // no folder open
+  | "loading"
+  | "ready"
+  | "denied"; // permission to a remembered folder was refused
+
+/** Which screen fills the main pane when no item file is selected. */
+export type HomeView = "dashboard" | "schema";
+
+/** An unsaved, in-memory edit to a single item, keyed by path in `drafts`. */
+export interface FileDraft {
+  frontmatter: Frontmatter;
+  body: string;
+}
+
+interface TrackerState {
+  status: FolderStatus;
+  rootHandle: FileSystemDirectoryHandle | null;
+  rootName: string;
+  tree: TreeNode[];
+  selectedPath: string | null;
+  homeView: HomeView;
+  searchIndex: SearchIndex;
+  schema: Schema;
+  dashboard: Dashboard;
+  canReopen: boolean;
+  /** Unsaved edits across any number of files; flushed together by `saveAll`. */
+  drafts: Record<string, FileDraft>;
+  saving: boolean;
+
+  init: () => Promise<void>;
+  openFolder: () => Promise<void>;
+  reopenLast: () => Promise<void>;
+  refreshTree: () => Promise<void>;
+  selectFile: (path: string | null) => void;
+  showHome: (view: HomeView) => void;
+  setDraft: (path: string, draft: FileDraft) => void;
+  saveAll: () => Promise<void>;
+  updateSchema: (next: Schema) => Promise<void>;
+  updateDashboard: (next: Dashboard) => Promise<void>;
+  newFile: (parentPath: string, name: string) => Promise<string | null>;
+  newFolder: (parentPath: string, name: string) => Promise<void>;
+  remove: (path: string) => Promise<void>;
+}
+
+const isSupported = typeof window !== "undefined" && "showDirectoryPicker" in window;
+
+/** Walk the tree to the node at `path`. */
+export function findNode(tree: TreeNode[], path: string): TreeNode | null {
+  for (const node of tree) {
+    if (node.path === path) return node;
+    if (node.children) {
+      const found = findNode(node.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+const parentOf = (path: string) => {
+  const i = path.lastIndexOf("/");
+  return i === -1 ? "" : path.slice(0, i);
+};
+const baseName = (path: string) => {
+  const i = path.lastIndexOf("/");
+  return i === -1 ? path : path.slice(i + 1);
+};
+
+export const useStore = create<TrackerState>((set, get) => {
+  /** Resolve a directory handle for a tree path ("" == root). */
+  const dirHandleFor = (path: string): FileSystemDirectoryHandle | null => {
+    if (path === "") return get().rootHandle;
+    const node = findNode(get().tree, path);
+    return node?.kind === "directory"
+      ? (node.handle as FileSystemDirectoryHandle)
+      : null;
+  };
+
+  const loadRoot = async (handle: FileSystemDirectoryHandle) => {
+    set({ status: "loading" });
+    const tree = await buildTree(handle);
+    const schema = await ensureSchema(handle, tree);
+    const dashboard = await ensureDashboard(handle);
+    const searchIndex = await buildSearchIndex(tree);
+    set({
+      status: "ready",
+      rootHandle: handle,
+      rootName: handle.name,
+      tree,
+      schema,
+      dashboard,
+      searchIndex,
+      drafts: {},
+    });
+  };
+
+  return {
+    status: isSupported ? "empty" : "unsupported",
+    rootHandle: null,
+    rootName: "",
+    tree: [],
+    selectedPath: null,
+    homeView: "dashboard",
+    searchIndex: { entries: [] },
+    schema: defaultSchema(),
+    dashboard: emptyDashboard(),
+    canReopen: false,
+    drafts: {},
+    saving: false,
+
+    async init() {
+      if (!isSupported) return;
+      const remembered = await loadRootHandle();
+      if (!remembered) return;
+      set({ canReopen: true });
+      // Auto-reopen silently when the browser still holds permission (e.g. the
+      // user chose "Allow on every visit"). Otherwise leave the reopen button
+      // for them — re-prompting requires a user gesture we don't have on load.
+      try {
+        if (await hasPermission(remembered)) await loadRoot(remembered);
+      } catch {
+        // Stale handle / folder moved or deleted — fall back to the button.
+      }
+    },
+
+    async openFolder() {
+      try {
+        const handle = await pickRootDirectory();
+        await saveRootHandle(handle);
+        set({ canReopen: true, selectedPath: null, homeView: "dashboard" });
+        await loadRoot(handle);
+      } catch (err) {
+        // AbortError = user dismissed the picker; ignore.
+        if ((err as DOMException)?.name !== "AbortError") throw err;
+      }
+    },
+
+    async reopenLast() {
+      const handle = await loadRootHandle();
+      if (!handle) return;
+      if (!(await verifyPermission(handle))) {
+        set({ status: "denied" });
+        return;
+      }
+      await loadRoot(handle);
+    },
+
+    async refreshTree() {
+      const handle = get().rootHandle;
+      if (!handle) return;
+      const tree = await buildTree(handle);
+      const searchIndex = await buildSearchIndex(tree);
+      set({ tree, searchIndex });
+    },
+
+    selectFile(path) {
+      set({ selectedPath: path });
+    },
+
+    showHome(view) {
+      set({ selectedPath: null, homeView: view });
+    },
+
+    setDraft(path, draft) {
+      set((s) => ({ drafts: { ...s.drafts, [path]: draft } }));
+    },
+
+    /** Flush every unsaved draft to disk in one go. Successful writes are
+     *  cleared; any that error stay dirty so they can be retried. */
+    async saveAll() {
+      const { drafts, tree, schema, saving } = get();
+      const paths = Object.keys(drafts);
+      if (saving || paths.length === 0) return;
+      set({ saving: true });
+      const remaining = { ...drafts };
+      try {
+        for (const path of paths) {
+          const node = findNode(tree, path);
+          if (node?.kind !== "file") {
+            delete remaining[path]; // file is gone; drop the orphaned draft
+            continue;
+          }
+          try {
+            const { frontmatter, body } = drafts[path];
+            const normalized = normalizeFrontmatter(schema, frontmatter);
+            await writeFile(
+              node.handle as FileSystemFileHandle,
+              stringifyFrontmatter(normalized, body),
+            );
+            delete remaining[path];
+          } catch {
+            /* keep this draft dirty for retry */
+          }
+        }
+      } finally {
+        set({ drafts: remaining, saving: false });
+      }
+    },
+
+    async updateSchema(next) {
+      const handle = get().rootHandle;
+      if (handle) await saveSchema(handle, next);
+      set({ schema: next });
+    },
+
+    async updateDashboard(next) {
+      const handle = get().rootHandle;
+      if (handle) await saveDashboard(handle, next);
+      set({ dashboard: next });
+    },
+
+    async newFile(parentPath, name) {
+      const dir = dirHandleFor(parentPath);
+      if (!dir) return null;
+      const fileName = name.endsWith(".md") ? name : `${name}.md`;
+      const title = fileName.replace(/\.md$/, "");
+      const content = stringifyFrontmatter(
+        templateFrontmatter(get().schema, title),
+        "",
+      );
+      await createFile(dir, fileName, content);
+      await get().refreshTree();
+      const path = parentPath ? `${parentPath}/${fileName}` : fileName;
+      set({ selectedPath: path });
+      return path;
+    },
+
+    async newFolder(parentPath, name) {
+      const dir = dirHandleFor(parentPath);
+      if (!dir) return;
+      await createDirectory(dir, name);
+      await get().refreshTree();
+    },
+
+    async remove(path) {
+      const parent = dirHandleFor(parentOf(path));
+      if (!parent) return;
+      const node = findNode(get().tree, path);
+      await deleteEntry(parent, baseName(path), node?.kind === "directory");
+      // Drop any drafts for the deleted file (or for files under a deleted folder).
+      set((s) => {
+        const drafts = Object.fromEntries(
+          Object.entries(s.drafts).filter(
+            ([p]) => p !== path && !p.startsWith(`${path}/`),
+          ),
+        );
+        return {
+          drafts,
+          selectedPath: s.selectedPath === path ? null : s.selectedPath,
+        };
+      });
+      await get().refreshTree();
+    },
+  };
+});
