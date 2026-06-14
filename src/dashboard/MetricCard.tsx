@@ -52,16 +52,24 @@ export function MetricCard({ result }: { result: MetricResult }) {
       ) : def.kind === "ratio" ? (
         <Ratio ratio={ratio} />
       ) : def.kind === "aggregate" ? (
-        <div className="flex flex-1 flex-col justify-center py-4">
-          <span className="text-4xl font-semibold tracking-tight text-accent">
-            {scalar == null ? "—" : formatScalar(scalar)}
-          </span>
-          <span className="mt-1 text-xs text-muted">
-            {scalar == null
-              ? "No numeric values"
-              : `across ${total} item${total === 1 ? "" : "s"}`}
-          </span>
-        </div>
+        groups ? ( // grouped aggregate → one bar per category
+          groups.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted">No data yet.</p>
+          ) : (
+            <Bars groups={groups} colors={colors} />
+          )
+        ) : (
+          <div className="flex flex-1 flex-col justify-center py-4">
+            <span className="text-4xl font-semibold tracking-tight text-accent">
+              {scalar == null ? "—" : formatScalar(scalar)}
+            </span>
+            <span className="mt-1 text-xs text-muted">
+              {scalar == null
+                ? "No numeric values"
+                : `across ${total} item${total === 1 ? "" : "s"}`}
+            </span>
+          </div>
+        )
       ) : pivot ? (
         <Pivot pivot={pivot} colors={colors} />
       ) : !groups || groups.length === 0 ? (

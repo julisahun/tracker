@@ -154,6 +154,7 @@ export function DashboardEditor({
       .map((m) => {
         const isRatio = m.kind === "ratio";
         const isCount = m.kind === "count";
+        const isAggregate = m.kind === "aggregate";
         const bins = parseBins(binsText[m.id] ?? "");
         return {
           id: m.id || newId(),
@@ -165,7 +166,9 @@ export function DashboardEditor({
           ...(!isRatio && clean(m.value) ? { value: clean(m.value) } : {}),
           ...(clean(m.filter) ? { filter: clean(m.filter) } : {}),
           ...(isCount && bins.length ? { bins } : {}),
-          ...(isCount && clean(m.groupBy2) ? { groupBy2: clean(m.groupBy2) } : {}),
+          ...((isCount || isAggregate) && clean(m.groupBy2)
+            ? { groupBy2: clean(m.groupBy2) }
+            : {}),
           ...(isRatio && clean(m.ratioNumerator)
             ? { ratioNumerator: clean(m.ratioNumerator) }
             : {}),
@@ -220,6 +223,7 @@ export function DashboardEditor({
             const kinds = kindsForMetric(type, hasValueExpr);
             const isRatio = m.kind === "ratio";
             const isCount = m.kind === "count";
+            const isAggregate = m.kind === "aggregate";
             return (
               <div key={m.id} className="rounded-xl border border-line bg-bg/40 p-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -303,7 +307,7 @@ export function DashboardEditor({
                     </label>
                   )}
 
-                  {isCount && (
+                  {(isCount || isAggregate) && (
                     <label className="flex items-center gap-1.5">
                       Group by
                       <Select

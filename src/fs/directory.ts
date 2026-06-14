@@ -88,6 +88,13 @@ export async function readFile(handle: FileSystemFileHandle): Promise<string> {
   return file.text();
 }
 
+/** Read a file's raw bytes (for images and other binary content). */
+export async function readFileAsBlob(
+  handle: FileSystemFileHandle,
+): Promise<Blob> {
+  return handle.getFile(); // File extends Blob
+}
+
 export async function writeFile(
   handle: FileSystemFileHandle,
   content: string,
@@ -105,6 +112,19 @@ export async function createFile(
 ): Promise<FileSystemFileHandle> {
   const handle = await parent.getFileHandle(name, { create: true });
   if (content) await writeFile(handle, content);
+  return handle;
+}
+
+/** Create (or overwrite) a file inside `parent` from binary `blob` content. */
+export async function createFileFromBlob(
+  parent: FileSystemDirectoryHandle,
+  name: string,
+  blob: Blob,
+): Promise<FileSystemFileHandle> {
+  const handle = await parent.getFileHandle(name, { create: true });
+  const writable = await handle.createWritable();
+  await writable.write(blob);
+  await writable.close();
   return handle;
 }
 

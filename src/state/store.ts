@@ -27,6 +27,13 @@ import {
   emptyDashboard,
   type Dashboard,
 } from "../dashboard/dashboard";
+import { ensurePhrases, defaultPhrases, type Phrases } from "../phrases/phrases";
+import {
+  makeBundle,
+  applyBundle,
+  readBundleImages,
+  type ConfigBundle,
+} from "../config/configBundle";
 
 export type FolderStatus =
   | "unsupported" // browser lacks the File System Access API
@@ -54,6 +61,7 @@ interface TrackerState {
   searchIndex: SearchIndex;
   schema: Schema;
   dashboard: Dashboard;
+  phrases: Phrases;
   canReopen: boolean;
   /** Unsaved edits across any number of files; flushed together by `saveAll`. */
   drafts: Record<string, FileDraft>;
@@ -69,6 +77,8 @@ interface TrackerState {
   saveAll: () => Promise<void>;
   updateSchema: (next: Schema) => Promise<void>;
   updateDashboard: (next: Dashboard) => Promise<void>;
+  exportConfig: () => Promise<ConfigBundle>;
+  importConfig: (bundle: ConfigBundle) => Promise<void>;
   newFile: (parentPath: string, name: string) => Promise<string | null>;
   newFolder: (parentPath: string, name: string) => Promise<void>;
   remove: (path: string) => Promise<void>;
@@ -112,6 +122,7 @@ export const useStore = create<TrackerState>((set, get) => {
     const tree = await buildTree(handle);
     const schema = await ensureSchema(handle, tree);
     const dashboard = await ensureDashboard(handle);
+    const phrases = await ensurePhrases(handle);
     const searchIndex = await buildSearchIndex(tree);
     set({
       status: "ready",
@@ -120,6 +131,7 @@ export const useStore = create<TrackerState>((set, get) => {
       tree,
       schema,
       dashboard,
+      phrases,
       searchIndex,
       drafts: {},
     });
@@ -135,6 +147,7 @@ export const useStore = create<TrackerState>((set, get) => {
     searchIndex: { entries: [] },
     schema: defaultSchema(),
     dashboard: emptyDashboard(),
+    phrases: defaultPhrases(),
     canReopen: false,
     drafts: {},
     saving: false,
@@ -238,6 +251,36 @@ export const useStore = create<TrackerState>((set, get) => {
       const handle = get().rootHandle;
       if (handle) await saveDashboard(handle, next);
       set({ dashboard: next });
+    },
+
+    /** Gather the current config (schema, dashboard, phrases + images) into a
+     *  portable bundle. Configs come from in-memory state so unsaved config
+     *  edits are included; images are read fresh from disk. */
+    async exportConfig() {
+      const { rootHandle, schema, dashboard, phrases } = get();
+      const images = rootHandle ? await readBundleImages(rootHandle) : [];
+      return makeBundle({
+        schema,
+        dashboard,
+        phrases,
+        images,
+        exportedAt: new Date().toISOString(),
+      });
+    },
+
+    /** Write an imported bundle to disk and adopt its config into state. Only
+     *  the parts the bundle carries are replaced; the rest is left as-is. */
+    async importConfig(bundle) {
+      const handle = get().rootHandle;
+      if (!handle) return;
+      await applyBundle(handle, bundle);
+      set((s) => ({
+        schema: bundle.schema ?? s.schema,
+        dashboard: bundle.dashboard ?? s.dashboard,
+        phrases: bundle.phrases ?? s.phrases,
+      }));
+      // Rebuild the search index in case the schema (indexed fields) changed.
+      await get().refreshTree();
     },
 
     async newFile(parentPath, name) {

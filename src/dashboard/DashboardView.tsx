@@ -6,6 +6,7 @@ import type { Frontmatter } from "../format/frontmatter";
 import { computeMetric } from "./dashboard";
 import { MetricCard } from "./MetricCard";
 import { DashboardEditor } from "./DashboardEditor";
+import { PhraseBanner } from "../phrases/PhraseBanner";
 
 export function Dashboard() {
   const tree = useStore((s) => s.tree);
@@ -59,6 +60,7 @@ export function Dashboard() {
       </header>
 
       <div className="flex-1 p-7">
+        <PhraseBanner />
         {metrics.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
             <span className="grid h-16 w-16 place-items-center rounded-2xl border border-line bg-surface text-muted">

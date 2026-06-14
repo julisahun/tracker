@@ -107,6 +107,47 @@ describe("computeMetric · aggregate", () => {
   });
 });
 
+describe("computeMetric · aggregate grouped by a category", () => {
+  const data = [
+    { name: "Alice", answered: 3 },
+    { name: "Bob", answered: 5 },
+    { name: "Alice", answered: 2 },
+    { name: "Bob", answered: "oops" }, // non-numeric, skipped
+  ];
+  const sch: Schema = {
+    fields: [
+      { key: "name", label: "Name", type: "text" },
+      { key: "answered", label: "Answered", type: "number" },
+    ],
+  };
+
+  it("sums the value per group → one bar each, sorted desc", () => {
+    const r = computeMetric(
+      metric({ field: "answered", kind: "aggregate", agg: "sum", groupBy2: "name" }),
+      sch,
+      data,
+    );
+    expect(r.scalar).toBeUndefined();
+    expect(r.groups).toEqual([
+      { label: "Alice", value: 5 }, // 3 + 2
+      { label: "Bob", value: 5 }, // 5 only ("oops" skipped) → tie, alpha order
+    ]);
+    expect(r.total).toBe(3); // contributing numeric items
+  });
+
+  it("averages the value per group", () => {
+    const r = computeMetric(
+      metric({ field: "answered", kind: "aggregate", agg: "avg", groupBy2: "name" }),
+      sch,
+      data,
+    );
+    expect(r.groups).toEqual([
+      { label: "Bob", value: 5 }, // avg of [5]
+      { label: "Alice", value: 2.5 }, // avg of [3, 2]
+    ]);
+  });
+});
+
 describe("computeMetric · unknown field", () => {
   it("returns an empty result rather than throwing", () => {
     const r = computeMetric(metric({ field: "nope" }), schema, items);

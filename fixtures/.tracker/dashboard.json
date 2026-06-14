@@ -29,6 +29,14 @@
       "kind": "ratio",
       "ratioNumerator": "schemaDone",
       "ratioDenominator": "1"
+    },
+    {
+      "id": "9e232a3d-ee1d-47ac-b336-bba5e6be1802",
+      "title": "Tablita",
+      "field": "answeredQuestions",
+      "kind": "aggregate",
+      "agg": "sum",
+      "groupBy2": "name"
     }
   ]
 }

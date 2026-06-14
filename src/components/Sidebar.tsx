@@ -13,6 +13,8 @@ import { FileTree } from "../tree/FileTree";
 import { SearchBox } from "../search/SearchBox";
 import { ThemeToggle } from "./ThemeToggle";
 import { IconButton } from "./IconButton";
+import { promptDialog } from "./dialog";
+import { ConfigIO } from "../config/ConfigIO";
 
 export function Sidebar() {
   const status = useStore((s) => s.status);
@@ -54,7 +56,11 @@ export function Sidebar() {
             <IconButton
               title="New item at root"
               onClick={async () => {
-                const name = window.prompt("New item name (.md):");
+                const name = await promptDialog({
+                  title: "New item",
+                  placeholder: "name.md",
+                  confirmLabel: "Create",
+                });
                 if (name) await newFile("", name.trim());
               }}
             >
@@ -63,7 +69,11 @@ export function Sidebar() {
             <IconButton
               title="New folder at root"
               onClick={async () => {
-                const name = window.prompt("New folder name:");
+                const name = await promptDialog({
+                  title: "New folder",
+                  placeholder: "Folder name",
+                  confirmLabel: "Create",
+                });
                 if (name) await newFolder("", name.trim());
               }}
             >
@@ -122,6 +132,10 @@ export function Sidebar() {
 
           <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
             <FileTree />
+          </div>
+
+          <div className="border-t border-line">
+            <ConfigIO />
           </div>
         </>
       ) : (

@@ -6,6 +6,7 @@ import { Breadcrumbs } from "./tree/Breadcrumbs";
 import { ItemEditor } from "./editor/ItemEditor";
 import { Dashboard } from "./dashboard/DashboardView";
 import { SchemaView } from "./schema/SchemaView";
+import { DialogHost } from "./components/dialog";
 
 export default function App() {
   const init = useStore((s) => s.init);
@@ -60,6 +61,8 @@ export default function App() {
           />
         )}
       </main>
+
+      <DialogHost />
     </div>
   );
 }

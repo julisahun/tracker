@@ -245,6 +245,20 @@ function computeBoolean(
   };
 }
 
+/** Reduce a list of numbers by the given aggregation. Caller ensures non-empty. */
+function applyAgg(nums: number[], agg: Aggregation): number {
+  switch (agg) {
+    case "avg":
+      return nums.reduce((a, b) => a + b, 0) / nums.length;
+    case "min":
+      return Math.min(...nums);
+    case "max":
+      return Math.max(...nums);
+    default: // sum
+      return nums.reduce((a, b) => a + b, 0);
+  }
+}
+
 function computeAggregate(
   def: MetricDef,
   valueExpr: CompiledExpr,
@@ -257,23 +271,51 @@ function computeAggregate(
     if (!Number.isNaN(n)) nums.push(n);
   }
   if (nums.length === 0) return { scalar: null, total: 0 };
+  return { scalar: applyAgg(nums, def.agg ?? "sum"), total: nums.length };
+}
+
+/**
+ * Aggregate a numeric value per category (`groupBy2`) → one bar per group, the
+ * bar's height being the sum/avg/min/max of the value within that group. Items
+ * whose value isn't numeric are skipped; multi-value categories (tags) credit
+ * each label, mirroring the count/pivot behavior.
+ */
+function computeAggregateGrouped(
+  def: MetricDef,
+  valueExpr: CompiledExpr,
+  group2Expr: CompiledExpr,
+  schema: Schema,
+  frontmatters: Frontmatter[],
+): { groups: { label: string; value: number }[]; total: number } {
+  const group2Field = fieldFor(schema, def.groupBy2 ?? "");
+  const groupLabels = (fm: Frontmatter): string[] => {
+    const raw =
+      def.groupBy2 && !group2Field
+        ? group2Expr.eval(fm, schema)
+        : group2Field
+          ? coerceValue(group2Field, fm[def.groupBy2 ?? ""])
+          : "";
+    return countLabels(raw, { ...def, bins: undefined });
+  };
+
+  const buckets = new Map<string, number[]>();
+  let contributing = 0;
+  for (const fm of frontmatters) {
+    const n = exprToNumber(selectValue(def, valueExpr, schema, fm));
+    if (Number.isNaN(n)) continue;
+    contributing++;
+    for (const label of groupLabels(fm)) {
+      const arr = buckets.get(label);
+      if (arr) arr.push(n);
+      else buckets.set(label, [n]);
+    }
+  }
 
   const agg = def.agg ?? "sum";
-  let scalar: number;
-  switch (agg) {
-    case "avg":
-      scalar = nums.reduce((a, b) => a + b, 0) / nums.length;
-      break;
-    case "min":
-      scalar = Math.min(...nums);
-      break;
-    case "max":
-      scalar = Math.max(...nums);
-      break;
-    default: // sum
-      scalar = nums.reduce((a, b) => a + b, 0);
-  }
-  return { scalar, total: nums.length };
+  const groups = [...buckets.entries()]
+    .map(([label, nums]) => ({ label, value: applyAgg(nums, agg) }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  return { groups, total: contributing };
 }
 
 function computeRatio(
@@ -344,12 +386,22 @@ export function computeMetric(
         error: firstError(valueExpr, filterExpr),
         ...computeBoolean(def, valueExpr, schema, scoped),
       };
-    case "aggregate":
+    case "aggregate": {
+      // With a category, aggregate per group → one bar each; else a scalar.
+      if (def.groupBy2 && def.groupBy2.trim()) {
+        const group2Expr = compile(def.groupBy2);
+        return {
+          def,
+          error: firstError(valueExpr, filterExpr, group2Expr),
+          ...computeAggregateGrouped(def, valueExpr, group2Expr, schema, scoped),
+        };
+      }
       return {
         def,
         error: firstError(valueExpr, filterExpr),
         ...computeAggregate(def, valueExpr, schema, scoped),
       };
+    }
     default: {
       // count — pivot when a second dimension is configured
       if (def.groupBy2 && def.groupBy2.trim()) {

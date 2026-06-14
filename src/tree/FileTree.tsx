@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { TreeNode } from "../fs/directory";
 import { useStore } from "../state/store";
+import { confirmDialog, promptDialog } from "../components/dialog";
 
 interface RowProps {
   node: TreeNode;
@@ -38,16 +39,30 @@ function Row({ node, depth, expanded, toggle }: RowProps) {
     fn();
   };
   const onNewFile = stop(async () => {
-    const name = window.prompt("New item name (.md):");
+    const name = await promptDialog({
+      title: "New item",
+      placeholder: "name.md",
+      confirmLabel: "Create",
+    });
     if (name) await newFile(node.path, name.trim());
   });
   const onNewFolder = stop(async () => {
-    const name = window.prompt("New folder name:");
+    const name = await promptDialog({
+      title: "New folder",
+      placeholder: "Folder name",
+      confirmLabel: "Create",
+    });
     if (name) await newFolder(node.path, name.trim());
   });
   const onDelete = stop(async () => {
     const label = isDir ? `folder "${node.name}" and its contents` : `"${node.name}"`;
-    if (window.confirm(`Delete ${label}?`)) await remove(node.path);
+    const ok = await confirmDialog({
+      title: "Delete",
+      message: `Delete ${label}? This can't be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (ok) await remove(node.path);
   });
 
   return (
