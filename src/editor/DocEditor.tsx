@@ -1,8 +1,28 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import Link from "@tiptap/extension-link";
 import { Markdown } from "tiptap-markdown";
-import { Bold, Italic, Heading2, List, Save, Check } from "lucide-react";
+import {
+  Bold,
+  Italic,
+  Strikethrough,
+  Code,
+  Heading1,
+  Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  ListTodo,
+  Quote,
+  SquareCode,
+  Minus,
+  Link2,
+  Save,
+  Check,
+} from "lucide-react";
 import { type Frontmatter } from "../format/frontmatter";
 import { useStore } from "../state/store";
 import { normalizeFrontmatter } from "../schema/schema";
@@ -50,6 +70,9 @@ export function DocEditor({
   const editor = useEditor({
     extensions: [
       StarterKit,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Link.configure({ openOnClick: false, autolink: true }),
       Markdown.configure({ html: false, transformPastedText: true }),
     ],
     content: initialDraft?.body ?? initialBody,
@@ -166,8 +189,25 @@ function ToolbarButton({
   );
 }
 
+function ToolbarDivider() {
+  return <span className="mx-0.5 h-4 w-px bg-line" />;
+}
+
 function Toolbar({ editor }: { editor: Editor | null }) {
   if (!editor) return null;
+
+  const setLink = () => {
+    const url = window.prompt(
+      "Link URL",
+      (editor.getAttributes("link").href as string | undefined) ?? "",
+    );
+    if (url === null) return; // cancelled
+    if (url === "") {
+      editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    } else {
+      editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+    }
+  };
 
   return (
     <div className="flex items-center gap-1 rounded-lg border border-line bg-raised/40 p-0.5">
@@ -186,18 +226,99 @@ function Toolbar({ editor }: { editor: Editor | null }) {
         <Italic size={15} />
       </ToolbarButton>
       <ToolbarButton
-        title="Heading"
+        title="Strikethrough"
+        active={editor.isActive("strike")}
+        onClick={() => editor.chain().focus().toggleStrike().run()}
+      >
+        <Strikethrough size={15} />
+      </ToolbarButton>
+      <ToolbarButton
+        title="Inline code"
+        active={editor.isActive("code")}
+        onClick={() => editor.chain().focus().toggleCode().run()}
+      >
+        <Code size={15} />
+      </ToolbarButton>
+
+      <ToolbarDivider />
+
+      <ToolbarButton
+        title="Heading 1"
+        active={editor.isActive("heading", { level: 1 })}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+      >
+        <Heading1 size={15} />
+      </ToolbarButton>
+      <ToolbarButton
+        title="Heading 2"
         active={editor.isActive("heading", { level: 2 })}
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
       >
         <Heading2 size={15} />
       </ToolbarButton>
       <ToolbarButton
+        title="Heading 3"
+        active={editor.isActive("heading", { level: 3 })}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+      >
+        <Heading3 size={15} />
+      </ToolbarButton>
+
+      <ToolbarDivider />
+
+      <ToolbarButton
         title="Bullet list"
         active={editor.isActive("bulletList")}
         onClick={() => editor.chain().focus().toggleBulletList().run()}
       >
         <List size={15} />
+      </ToolbarButton>
+      <ToolbarButton
+        title="Ordered list"
+        active={editor.isActive("orderedList")}
+        onClick={() => editor.chain().focus().toggleOrderedList().run()}
+      >
+        <ListOrdered size={15} />
+      </ToolbarButton>
+      <ToolbarButton
+        title="Task list"
+        active={editor.isActive("taskList")}
+        onClick={() => editor.chain().focus().toggleTaskList().run()}
+      >
+        <ListTodo size={15} />
+      </ToolbarButton>
+
+      <ToolbarDivider />
+
+      <ToolbarButton
+        title="Quote"
+        active={editor.isActive("blockquote")}
+        onClick={() => editor.chain().focus().toggleBlockquote().run()}
+      >
+        <Quote size={15} />
+      </ToolbarButton>
+      <ToolbarButton
+        title="Code block"
+        active={editor.isActive("codeBlock")}
+        onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+      >
+        <SquareCode size={15} />
+      </ToolbarButton>
+      <ToolbarButton
+        title="Horizontal rule"
+        onClick={() => editor.chain().focus().setHorizontalRule().run()}
+      >
+        <Minus size={15} />
+      </ToolbarButton>
+
+      <ToolbarDivider />
+
+      <ToolbarButton
+        title="Link"
+        active={editor.isActive("link")}
+        onClick={setLink}
+      >
+        <Link2 size={15} />
       </ToolbarButton>
     </div>
   );
