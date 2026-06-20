@@ -77,7 +77,14 @@ export function DocEditor({
     ],
     content: initialDraft?.body ?? initialBody,
     editorProps: {
-      attributes: { class: "tracker-prose focus:outline-none" },
+      // `notranslate` / translate="no" keep translation extensions (Google
+      // Translate, DeepL, …) from rewriting the contenteditable's text nodes,
+      // which corrupts the DOM React manages and crashes the reconciler on the
+      // next commit (NotFoundError: insertBefore … not a child).
+      attributes: {
+        class: "tracker-prose notranslate focus:outline-none",
+        translate: "no",
+      },
     },
     onUpdate: ({ editor }) =>
       setDraft(path, {

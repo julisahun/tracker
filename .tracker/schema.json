@@ -1,0 +1,54 @@
+{
+  "fields": [
+    {
+      "key": "name",
+      "label": "Name",
+      "type": "text"
+    },
+    {
+      "key": "nQuestions",
+      "label": "NQuestions",
+      "type": "number"
+    },
+    {
+      "key": "answeredQuestions",
+      "label": "AnsweredQuestions",
+      "type": "number"
+    },
+    {
+      "key": "schemaDone",
+      "label": "SchemaDone",
+      "type": "boolean"
+    },
+    {
+      "key": "description",
+      "label": "Description",
+      "type": "text"
+    },
+    {
+      "key": "type",
+      "label": "Type",
+      "type": "text"
+    },
+    {
+      "key": "library",
+      "label": "Library",
+      "type": "text"
+    },
+    {
+      "key": "library_version",
+      "label": "Library Version",
+      "type": "text"
+    },
+    {
+      "key": "requires",
+      "label": "Requires",
+      "type": "tags"
+    },
+    {
+      "key": "sources",
+      "label": "Sources",
+      "type": "tags"
+    }
+  ]
+}

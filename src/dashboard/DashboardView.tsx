@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { BarChart3, Settings2, Plus } from "lucide-react";
-import { useStore } from "../state/store";
+import { BarChart3, Settings2, Plus, ArrowLeft } from "lucide-react";
+import { useStore, findNode } from "../state/store";
 import { collectFrontmatters } from "../schema/schema";
 import type { Frontmatter } from "../format/frontmatter";
 import { computeMetric } from "./dashboard";
@@ -13,6 +13,8 @@ export function Dashboard() {
   const schema = useStore((s) => s.schema);
   const dashboard = useStore((s) => s.dashboard);
   const rootName = useStore((s) => s.rootName);
+  const dashboardScope = useStore((s) => s.dashboardScope);
+  const showHome = useStore((s) => s.showHome);
   const updateDashboard = useStore((s) => s.updateDashboard);
 
   const [frontmatters, setFrontmatters] = useState<Frontmatter[]>([]);
@@ -22,7 +24,10 @@ export function Dashboard() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void collectFrontmatters(tree).then((fms) => {
+    const scopeNodes = dashboardScope
+      ? (findNode(tree, dashboardScope)?.children ?? [])
+      : tree;
+    void collectFrontmatters(scopeNodes).then((fms) => {
       if (!cancelled) {
         setFrontmatters(fms);
         setLoading(false);
@@ -31,9 +36,12 @@ export function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [tree]);
+  }, [tree, dashboardScope]);
 
   const metrics = dashboard.metrics;
+  const scopeName = dashboardScope
+    ? (dashboardScope.split("/").pop() ?? dashboardScope)
+    : rootName;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-auto">
@@ -43,7 +51,7 @@ export function Dashboard() {
             <BarChart3 size={17} />
           </span>
           <div>
-            <h1 className="text-base font-semibold leading-tight">{rootName}</h1>
+            <h1 className="text-base font-semibold leading-tight">{scopeName}</h1>
             <p className="text-xs text-muted">
               {loading
                 ? "Loading items…"
@@ -51,12 +59,22 @@ export function Dashboard() {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => setEditing(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-accent hover:text-accent"
-        >
-          <Settings2 size={15} /> Configure
-        </button>
+        <div className="flex items-center gap-2">
+          {dashboardScope && (
+            <button
+              onClick={() => showHome("dashboard")}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-accent hover:text-accent"
+            >
+              <ArrowLeft size={15} /> All items
+            </button>
+          )}
+          <button
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-accent hover:text-accent"
+          >
+            <Settings2 size={15} /> Configure
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 p-7">

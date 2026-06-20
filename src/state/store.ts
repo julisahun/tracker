@@ -10,6 +10,12 @@ import {
   deleteEntry,
   type TreeNode,
 } from "../fs/directory";
+import {
+  ensureOrder,
+  saveOrder,
+  applyOrder,
+  type OrderConfig,
+} from "../fs/order";
 import { saveRootHandle, loadRootHandle } from "../fs/handleStore";
 import { buildSearchIndex, type SearchIndex } from "../search/searchIndex";
 import { stringifyFrontmatter, type Frontmatter } from "../format/frontmatter";
@@ -57,10 +63,14 @@ interface TrackerState {
   rootName: string;
   tree: TreeNode[];
   selectedPath: string | null;
+  /** Folder whose items the dashboard aggregates (null = whole tree / root). */
+  dashboardScope: string | null;
   homeView: HomeView;
   searchIndex: SearchIndex;
   schema: Schema;
   dashboard: Dashboard;
+  /** Custom sibling ordering for the sidebar tree, persisted per-root. */
+  order: OrderConfig;
   phrases: Phrases;
   canReopen: boolean;
   /** Unsaved edits across any number of files; flushed together by `saveAll`. */
@@ -72,7 +82,13 @@ interface TrackerState {
   reopenLast: () => Promise<void>;
   refreshTree: () => Promise<void>;
   selectFile: (path: string | null) => void;
+  selectFolder: (path: string) => void;
   showHome: (view: HomeView) => void;
+  moveNode: (
+    fromPath: string,
+    toPath: string,
+    place: "before" | "after",
+  ) => Promise<void>;
   setDraft: (path: string, draft: FileDraft) => void;
   saveAll: () => Promise<void>;
   updateSchema: (next: Schema) => Promise<void>;
@@ -119,9 +135,11 @@ export const useStore = create<TrackerState>((set, get) => {
 
   const loadRoot = async (handle: FileSystemDirectoryHandle) => {
     set({ status: "loading" });
-    const tree = await buildTree(handle);
-    const schema = await ensureSchema(handle, tree);
+    const built = await buildTree(handle);
+    const schema = await ensureSchema(handle, built);
     const dashboard = await ensureDashboard(handle);
+    const order = await ensureOrder(handle);
+    const tree = applyOrder(built, order);
     const phrases = await ensurePhrases(handle);
     const searchIndex = await buildSearchIndex(tree);
     set({
@@ -131,6 +149,7 @@ export const useStore = create<TrackerState>((set, get) => {
       tree,
       schema,
       dashboard,
+      order,
       phrases,
       searchIndex,
       drafts: {},
@@ -143,10 +162,12 @@ export const useStore = create<TrackerState>((set, get) => {
     rootName: "",
     tree: [],
     selectedPath: null,
+    dashboardScope: null,
     homeView: "dashboard",
     searchIndex: { entries: [] },
     schema: defaultSchema(),
     dashboard: emptyDashboard(),
+    order: {},
     phrases: defaultPhrases(),
     canReopen: false,
     drafts: {},
@@ -171,7 +192,12 @@ export const useStore = create<TrackerState>((set, get) => {
       try {
         const handle = await pickRootDirectory();
         await saveRootHandle(handle);
-        set({ canReopen: true, selectedPath: null, homeView: "dashboard" });
+        set({
+          canReopen: true,
+          selectedPath: null,
+          dashboardScope: null,
+          homeView: "dashboard",
+        });
         await loadRoot(handle);
       } catch (err) {
         // AbortError = user dismissed the picker; ignore.
@@ -192,7 +218,7 @@ export const useStore = create<TrackerState>((set, get) => {
     async refreshTree() {
       const handle = get().rootHandle;
       if (!handle) return;
-      const tree = await buildTree(handle);
+      const tree = applyOrder(await buildTree(handle), get().order);
       const searchIndex = await buildSearchIndex(tree);
       set({ tree, searchIndex });
     },
@@ -201,8 +227,37 @@ export const useStore = create<TrackerState>((set, get) => {
       set({ selectedPath: path });
     },
 
+    selectFolder(path) {
+      set({ selectedPath: null, dashboardScope: path, homeView: "dashboard" });
+    },
+
     showHome(view) {
-      set({ selectedPath: null, homeView: view });
+      set({ selectedPath: null, dashboardScope: null, homeView: view });
+    },
+
+    /** Reorder a sibling within its parent (drag & drop). Same-parent only;
+     *  cross-folder moves are not supported. Persists to `.tracker/order.json`
+     *  and re-applies the order to the in-memory tree. */
+    async moveNode(fromPath, toPath, place) {
+      if (fromPath === toPath) return;
+      const parent = parentOf(fromPath);
+      if (parent !== parentOf(toPath)) return; // siblings only
+
+      const siblings =
+        parent === "" ? get().tree : findNode(get().tree, parent)?.children;
+      if (!siblings) return;
+
+      const fromName = baseName(fromPath);
+      const toName = baseName(toPath);
+      const names = siblings.map((n) => n.name).filter((n) => n !== fromName);
+      const at = names.indexOf(toName);
+      if (at === -1) return;
+      names.splice(place === "after" ? at + 1 : at, 0, fromName);
+
+      const next = { ...get().order, [parent]: names };
+      const handle = get().rootHandle;
+      if (handle) await saveOrder(handle, next);
+      set({ order: next, tree: applyOrder(get().tree, next) });
     },
 
     setDraft(path, draft) {
@@ -318,9 +373,13 @@ export const useStore = create<TrackerState>((set, get) => {
             ([p]) => p !== path && !p.startsWith(`${path}/`),
           ),
         );
+        const scopeGone =
+          s.dashboardScope === path ||
+          (s.dashboardScope?.startsWith(`${path}/`) ?? false);
         return {
           drafts,
           selectedPath: s.selectedPath === path ? null : s.selectedPath,
+          dashboardScope: scopeGone ? null : s.dashboardScope,
         };
       });
       await get().refreshTree();
