@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
-import { FileText, Plus, Save, Check } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useStore, findNode } from "../state/store";
 import {
   readFile,
@@ -94,6 +94,15 @@ export function FolderNote({ scope }: FolderNoteProps) {
   );
 }
 
+type SaveStatus = "idle" | "saving" | "saved";
+
+const AUTOSAVE_MS = 800;
+
+/**
+ * Seamless inline editor for the folder note: no card, title or Save button —
+ * just prose flush with the dashboard. The toolbar fades in only while focused,
+ * and edits autosave (debounced + on blur), so it reads as part of the page.
+ */
 function NoteEditor({
   handle,
   frontmatter,
@@ -103,77 +112,92 @@ function NoteEditor({
   frontmatter: Frontmatter;
   initialBody: string;
 }) {
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [status, setStatus] = useState<SaveStatus>("idle");
+
+  // `dirty` tracks whether the latest content has been flushed; refs keep the
+  // newest editor/dirty reachable from debounce + unmount closures.
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyRef = useRef(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const editor = useEditor({
     extensions: bodyExtensions,
     content: initialBody,
     editorProps: bodyEditorProps,
-    onUpdate: () => setDirty(true),
+    onUpdate: () => {
+      dirtyRef.current = true;
+      scheduleSave();
+    },
+    onFocus: () => setFocused(true),
+    onBlur: () => {
+      setFocused(false);
+      flushSave();
+    },
   });
-
-  // Keep the freshest editor reachable from the keydown closure.
   const editorRef = useRef(editor);
   editorRef.current = editor;
 
   const save = useCallback(async () => {
     const ed = editorRef.current;
-    if (!ed) return;
-    setSaving(true);
-    try {
-      const body = ed.storage.markdown.getMarkdown();
-      await writeFile(handle, stringifyFrontmatter(frontmatter, body));
-      setDirty(false);
-    } finally {
-      setSaving(false);
-    }
+    if (!ed || !dirtyRef.current) return;
+    dirtyRef.current = false;
+    setStatus("saving");
+    const body = ed.storage.markdown.getMarkdown();
+    await writeFile(handle, stringifyFrontmatter(frontmatter, body));
+    setStatus("saved");
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => setStatus("idle"), 1500);
   }, [handle, frontmatter]);
 
+  const flushSave = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    void save();
+  }, [save]);
+
+  const scheduleSave = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => void save(), AUTOSAVE_MS);
+  }, [save]);
+
+  // Cmd/Ctrl+S forces an immediate save (no conflict: DocEditor's handler isn't
+  // mounted on the dashboard). Flush any pending edit on unmount / scope change.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        void save();
+        flushSave();
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [save]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      void save(); // flush pending edits before the editor goes away
+    };
+  }, [flushSave, save]);
 
   return (
-    <section className="mt-10">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-medium text-muted">
-          <FileText size={15} /> Note
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-xs text-muted">
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                dirty ? "bg-accent" : "bg-muted/40"
-              }`}
-            />
-            {saving ? "Saving…" : dirty ? "Unsaved" : "Saved"}
-          </span>
-          <button
-            onClick={() => void save()}
-            disabled={!dirty || saving}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg transition-colors hover:bg-accent-hover disabled:opacity-40"
-          >
-            {saving ? <Check size={14} /> : <Save size={14} />}
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
+    <section className="relative mt-10">
+      {/* Toolbar floats in the top-margin gap, only while editing — no layout shift. */}
+      <div
+        onMouseDown={(e) => e.preventDefault()}
+        className={`absolute left-0 top-0 z-10 -translate-y-full pb-2 transition-opacity ${
+          focused ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      >
+        <Toolbar editor={editor} />
       </div>
-      <div className="rounded-xl border border-line bg-surface">
-        <div className="border-b border-line px-3 py-2">
-          <Toolbar editor={editor} />
-        </div>
-        <div className="px-5 py-4">
-          <EditorContent editor={editor} />
-        </div>
-      </div>
+      <span
+        className={`absolute right-0 top-0 -translate-y-full pb-2 text-xs text-muted transition-opacity ${
+          status === "idle" ? "opacity-0" : "opacity-60"
+        }`}
+      >
+        {status === "saving" ? "Saving…" : "Saved"}
+      </span>
+      <EditorContent editor={editor} />
     </section>
   );
 }

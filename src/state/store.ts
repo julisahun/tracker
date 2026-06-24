@@ -98,6 +98,9 @@ interface TrackerState {
   phrases: Phrases;
   /** Image banners keyed by scope (`""` = root, else a folder path). */
   banners: Banners;
+  /** Bumped on every banner write so the image reloads even when the derived
+   *  filename is unchanged (e.g. replacing a JPG with another JPG). */
+  bannersRev: number;
   /** Custom browser-tab favicon for the workspace (one per folder). */
   favicon: Favicon;
   /** Calendar config: which date fields to project + standalone events. */
@@ -214,6 +217,7 @@ export const useStore = create<TrackerState>((set, get) => {
     order: {},
     phrases: defaultPhrases(),
     banners: defaultBanners(),
+    bannersRev: 0,
     favicon: defaultFavicon(),
     calendar: defaultCalendar(),
     dismissedAgendaDate: null,
@@ -380,7 +384,7 @@ export const useStore = create<TrackerState>((set, get) => {
       };
       await saveBanners(handle, next);
       if (prev && prev !== name) await deleteBannerImage(handle, prev);
-      set({ banners: next });
+      set({ banners: next, bannersRev: get().bannersRev + 1 });
     },
 
     /** Remove the banner for a scope key: drop it from `banners.json` and delete
@@ -394,7 +398,7 @@ export const useStore = create<TrackerState>((set, get) => {
       const next: Banners = { banners: rest };
       await saveBanners(handle, next);
       if (prev) await deleteBannerImage(handle, prev);
-      set({ banners: next });
+      set({ banners: next, bannersRev: get().bannersRev + 1 });
     },
 
     /** Set (or replace) the workspace's custom tab favicon. Writes the image

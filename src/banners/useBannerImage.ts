@@ -14,6 +14,9 @@ const SCHEMA_DIR = ".tracker";
  */
 export function useBannerImage(filename: string | undefined): string | null {
   const rootHandle = useStore((s) => s.rootHandle);
+  // Re-reads on each banner write so a same-name replacement (e.g. JPG → JPG,
+  // which yields an identical filename) still reloads the image.
+  const rev = useStore((s) => s.bannersRev);
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,7 +47,7 @@ export function useBannerImage(filename: string | undefined): string | null {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       setUrl(null);
     };
-  }, [filename, rootHandle]);
+  }, [filename, rootHandle, rev]);
 
   return url;
 }
