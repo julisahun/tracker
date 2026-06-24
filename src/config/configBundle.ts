@@ -1,8 +1,8 @@
 // Import / export of the on-disk `.tracker` config as a single portable JSON
-// bundle. A bundle gathers the three config files (schema, dashboard, phrases)
-// plus every image under `.tracker/phrase-images/` (base64-embedded), so it
-// round-trips a folder's entire configuration without touching the tracked
-// items themselves.
+// bundle. A bundle gathers the config files (schema, dashboard, phrases, banners)
+// plus every image under `.tracker/phrase-images/` and `.tracker/banner-images/`
+// (base64-embedded, each tagged with its `dir`), so it round-trips a folder's
+// entire configuration without touching the tracked items themselves.
 //
 // The bundle assembly (`makeBundle`) and validation (`parseBundle`) are pure
 // and unit-tested; reading/writing images and applying a bundle to disk are the
@@ -17,17 +17,21 @@ import {
 import { saveSchema, type Schema } from "../schema/schema";
 import { saveDashboard, type Dashboard } from "../dashboard/dashboard";
 import { savePhrases, PHRASE_IMAGES_DIR, type Phrases } from "../phrases/phrases";
+import { saveBanners, BANNER_IMAGES_DIR, type Banners } from "../banners/banners";
 
 const TRACKER_DIR = ".tracker";
 /** Marker so we can recognize (and reject non-) config bundles on import. */
 export const BUNDLE_MARKER = "tracker-config-bundle";
 export const BUNDLE_VERSION = 1;
 
-/** One phrase image, embedded base64 (no `data:` prefix) with its MIME type. */
+/** One config image, embedded base64 (no `data:` prefix) with its MIME type.
+ *  `dir` is the `.tracker` subfolder it belongs to; omitted means phrase-images
+ *  (the original bundle shape, kept for backward compatibility). */
 export interface BundleImage {
   name: string;
   type: string;
   data: string;
+  dir?: string;
 }
 
 export interface ConfigBundle {
@@ -37,6 +41,7 @@ export interface ConfigBundle {
   schema?: Schema;
   dashboard?: Dashboard;
   phrases?: Phrases;
+  banners?: Banners;
   images?: BundleImage[];
 }
 
@@ -44,6 +49,7 @@ export interface BundleParts {
   schema?: Schema;
   dashboard?: Dashboard;
   phrases?: Phrases;
+  banners?: Banners;
   images?: BundleImage[];
   exportedAt: string;
 }
@@ -67,6 +73,7 @@ export function makeBundle(parts: BundleParts): ConfigBundle {
   if (parts.schema) bundle.schema = parts.schema;
   if (parts.dashboard) bundle.dashboard = parts.dashboard;
   if (parts.phrases) bundle.phrases = parts.phrases;
+  if (parts.banners) bundle.banners = parts.banners;
   if (parts.images && parts.images.length) bundle.images = parts.images;
   return bundle;
 }
@@ -82,7 +89,8 @@ function validImages(value: unknown): value is BundleImage[] {
         isObject(i) &&
         typeof i.name === "string" &&
         typeof i.type === "string" &&
-        typeof i.data === "string",
+        typeof i.data === "string" &&
+        (i.dir === undefined || typeof i.dir === "string"),
     )
   );
 }
@@ -116,7 +124,7 @@ export function parseBundle(raw: string): ParseResult {
     };
   }
 
-  const { schema, dashboard, phrases, images } = parsed;
+  const { schema, dashboard, phrases, banners, images } = parsed;
   if (schema !== undefined && !(isObject(schema) && Array.isArray(schema.fields))) {
     return { ok: false, error: "Config has a malformed schema." };
   }
@@ -132,10 +140,21 @@ export function parseBundle(raw: string): ParseResult {
   ) {
     return { ok: false, error: "Config has malformed phrases." };
   }
+  if (
+    banners !== undefined &&
+    !(isObject(banners) && isObject(banners.banners))
+  ) {
+    return { ok: false, error: "Config has malformed banners." };
+  }
   if (images !== undefined && !validImages(images)) {
     return { ok: false, error: "Config has malformed images." };
   }
-  if (schema === undefined && dashboard === undefined && phrases === undefined) {
+  if (
+    schema === undefined &&
+    dashboard === undefined &&
+    phrases === undefined &&
+    banners === undefined
+  ) {
     return { ok: false, error: "Config has nothing to import." };
   }
 
@@ -164,14 +183,16 @@ function base64ToBlob(data: string, type: string): Blob {
 
 // ---- IO over the root directory handle ---------------------------------
 
-/** Read every image under `.tracker/phrase-images/` as a base64 bundle entry. */
-export async function readBundleImages(
+/** Read every image under a `.tracker` subfolder as base64 bundle entries,
+ *  tagging each with its `dir` so it round-trips to the right place. */
+async function readImagesFrom(
   root: FileSystemDirectoryHandle,
+  subdir: string,
 ): Promise<BundleImage[]> {
   const images: BundleImage[] = [];
   try {
     const tracker = await root.getDirectoryHandle(TRACKER_DIR);
-    const dir = await tracker.getDirectoryHandle(PHRASE_IMAGES_DIR);
+    const dir = await tracker.getDirectoryHandle(subdir);
     for await (const handle of dir.values()) {
       if (handle.kind !== "file" || handle.name.startsWith(".")) continue;
       const blob = await readFileAsBlob(handle as FileSystemFileHandle);
@@ -179,6 +200,7 @@ export async function readBundleImages(
         name: handle.name,
         type: blob.type || "application/octet-stream",
         data: await blobToBase64(blob),
+        dir: subdir,
       });
     }
   } catch {
@@ -187,14 +209,30 @@ export async function readBundleImages(
   return images;
 }
 
-/** Write bundled images back into `.tracker/phrase-images/`. */
+/** Read all bundled config images (phrase + banner) as base64 entries. */
+export async function readBundleImages(
+  root: FileSystemDirectoryHandle,
+): Promise<BundleImage[]> {
+  const phrase = await readImagesFrom(root, PHRASE_IMAGES_DIR);
+  const banner = await readImagesFrom(root, BANNER_IMAGES_DIR);
+  return [...phrase, ...banner];
+}
+
+/** Write bundled images back into their `.tracker` subfolder. Entries with no
+ *  `dir` default to `phrase-images/` (the original bundle shape). */
 export async function writeBundleImages(
   root: FileSystemDirectoryHandle,
   images: BundleImage[],
 ): Promise<void> {
   const tracker = await createDirectory(root, TRACKER_DIR);
-  const dir = await createDirectory(tracker, PHRASE_IMAGES_DIR);
+  const dirs = new Map<string, FileSystemDirectoryHandle>();
   for (const img of images) {
+    const subdir = img.dir ?? PHRASE_IMAGES_DIR;
+    let dir = dirs.get(subdir);
+    if (!dir) {
+      dir = await createDirectory(tracker, subdir);
+      dirs.set(subdir, dir);
+    }
     await createFileFromBlob(dir, img.name, base64ToBlob(img.data, img.type));
   }
 }
@@ -211,5 +249,6 @@ export async function applyBundle(
   if (bundle.schema) await saveSchema(root, bundle.schema);
   if (bundle.dashboard) await saveDashboard(root, bundle.dashboard);
   if (bundle.phrases) await savePhrases(root, bundle.phrases);
+  if (bundle.banners) await saveBanners(root, bundle.banners);
   if (bundle.images?.length) await writeBundleImages(root, bundle.images);
 }

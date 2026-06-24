@@ -7,6 +7,7 @@ import { computeMetric } from "./dashboard";
 import { MetricCard } from "./MetricCard";
 import { DashboardEditor } from "./DashboardEditor";
 import { PhraseBanner } from "../phrases/PhraseBanner";
+import { Banner } from "../banners/Banner";
 
 export function Dashboard() {
   const tree = useStore((s) => s.tree);
@@ -78,6 +79,9 @@ export function Dashboard() {
       </header>
 
       <div className="flex-1 p-7">
+        <div className="mb-6">
+          <Banner scopeKey={dashboardScope ?? ""} editable />
+        </div>
         <PhraseBanner />
         {metrics.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">

@@ -4,6 +4,7 @@ import { useStore } from "./state/store";
 import { Sidebar } from "./components/Sidebar";
 import { Breadcrumbs } from "./tree/Breadcrumbs";
 import { ItemEditor } from "./editor/ItemEditor";
+import { Banner } from "./banners/Banner";
 import { Dashboard } from "./dashboard/DashboardView";
 import { SchemaView } from "./schema/SchemaView";
 import { DialogHost } from "./components/dialog";
@@ -45,6 +46,7 @@ export default function App() {
               <header className="flex h-12 shrink-0 items-center border-b border-line px-7">
                 <Breadcrumbs rootName={rootName} path={selectedPath} />
               </header>
+              <ItemBanner path={selectedPath} />
               <ItemEditor key={selectedPath} path={selectedPath} />
             </>
           ) : homeView === "schema" ? (
@@ -63,6 +65,20 @@ export default function App() {
       </main>
 
       <DialogHost />
+    </div>
+  );
+}
+
+/** Banner shown above the item editor, using the item's parent-folder banner.
+ *  Renders nothing (no padding) unless that folder has a banner set. */
+function ItemBanner({ path }: { path: string }) {
+  const i = path.lastIndexOf("/");
+  const parentKey = i === -1 ? "" : path.slice(0, i);
+  const hasBanner = useStore((s) => Boolean(s.banners.banners[parentKey]));
+  if (!hasBanner) return null;
+  return (
+    <div className="shrink-0 px-7 pt-6">
+      <Banner scopeKey={parentKey} />
     </div>
   );
 }

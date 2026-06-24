@@ -35,6 +35,16 @@ import {
 } from "../dashboard/dashboard";
 import { ensurePhrases, defaultPhrases, type Phrases } from "../phrases/phrases";
 import {
+  ensureBanners,
+  saveBanners,
+  defaultBanners,
+  writeBannerImage,
+  deleteBannerImage,
+  extForType,
+  sanitizeKey,
+  type Banners,
+} from "../banners/banners";
+import {
   makeBundle,
   applyBundle,
   readBundleImages,
@@ -72,6 +82,8 @@ interface TrackerState {
   /** Custom sibling ordering for the sidebar tree, persisted per-root. */
   order: OrderConfig;
   phrases: Phrases;
+  /** Image banners keyed by scope (`""` = root, else a folder path). */
+  banners: Banners;
   canReopen: boolean;
   /** Unsaved edits across any number of files; flushed together by `saveAll`. */
   drafts: Record<string, FileDraft>;
@@ -93,6 +105,8 @@ interface TrackerState {
   saveAll: () => Promise<void>;
   updateSchema: (next: Schema) => Promise<void>;
   updateDashboard: (next: Dashboard) => Promise<void>;
+  setBanner: (key: string, file: File) => Promise<void>;
+  removeBanner: (key: string) => Promise<void>;
   exportConfig: () => Promise<ConfigBundle>;
   importConfig: (bundle: ConfigBundle) => Promise<void>;
   newFile: (parentPath: string, name: string) => Promise<string | null>;
@@ -141,6 +155,7 @@ export const useStore = create<TrackerState>((set, get) => {
     const order = await ensureOrder(handle);
     const tree = applyOrder(built, order);
     const phrases = await ensurePhrases(handle);
+    const banners = await ensureBanners(handle);
     const searchIndex = await buildSearchIndex(tree);
     set({
       status: "ready",
@@ -151,6 +166,7 @@ export const useStore = create<TrackerState>((set, get) => {
       dashboard,
       order,
       phrases,
+      banners,
       searchIndex,
       drafts: {},
     });
@@ -169,6 +185,7 @@ export const useStore = create<TrackerState>((set, get) => {
     dashboard: emptyDashboard(),
     order: {},
     phrases: defaultPhrases(),
+    banners: defaultBanners(),
     canReopen: false,
     drafts: {},
     saving: false,
@@ -308,16 +325,48 @@ export const useStore = create<TrackerState>((set, get) => {
       set({ dashboard: next });
     },
 
+    /** Set (or replace) the banner image for a scope key (`""` = root). Writes
+     *  the image into `.tracker/banner-images/` and records its filename in
+     *  `banners.json`. A prior image with a different name is removed. */
+    async setBanner(key, file) {
+      const handle = get().rootHandle;
+      if (!handle) return;
+      const name = `${sanitizeKey(key)}.${extForType(file.type)}`;
+      const prev = get().banners.banners[key];
+      await writeBannerImage(handle, name, file);
+      const next: Banners = {
+        banners: { ...get().banners.banners, [key]: name },
+      };
+      await saveBanners(handle, next);
+      if (prev && prev !== name) await deleteBannerImage(handle, prev);
+      set({ banners: next });
+    },
+
+    /** Remove the banner for a scope key: drop it from `banners.json` and delete
+     *  the image file (best-effort). */
+    async removeBanner(key) {
+      const handle = get().rootHandle;
+      if (!handle) return;
+      const prev = get().banners.banners[key];
+      const rest = { ...get().banners.banners };
+      delete rest[key];
+      const next: Banners = { banners: rest };
+      await saveBanners(handle, next);
+      if (prev) await deleteBannerImage(handle, prev);
+      set({ banners: next });
+    },
+
     /** Gather the current config (schema, dashboard, phrases + images) into a
      *  portable bundle. Configs come from in-memory state so unsaved config
      *  edits are included; images are read fresh from disk. */
     async exportConfig() {
-      const { rootHandle, schema, dashboard, phrases } = get();
+      const { rootHandle, schema, dashboard, phrases, banners } = get();
       const images = rootHandle ? await readBundleImages(rootHandle) : [];
       return makeBundle({
         schema,
         dashboard,
         phrases,
+        banners,
         images,
         exportedAt: new Date().toISOString(),
       });
@@ -333,6 +382,7 @@ export const useStore = create<TrackerState>((set, get) => {
         schema: bundle.schema ?? s.schema,
         dashboard: bundle.dashboard ?? s.dashboard,
         phrases: bundle.phrases ?? s.phrases,
+        banners: bundle.banners ?? s.banners,
       }));
       // Rebuild the search index in case the schema (indexed fields) changed.
       await get().refreshTree();
