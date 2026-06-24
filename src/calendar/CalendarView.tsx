@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
@@ -8,12 +8,20 @@ import {
   X,
   FileText,
   CalendarPlus,
+  CalendarClock,
 } from "lucide-react";
 import { useStore } from "../state/store";
 import { templateFrontmatter } from "../schema/schema";
 import { Checkbox } from "../components/Checkbox";
 import { useCalendarEntries } from "./useCalendarEntries";
-import { monthMatrix, todayStr, WEEKDAYS, type CalEntry } from "./calendar";
+import {
+  monthMatrix,
+  todayStr,
+  buildUpcoming,
+  dayLabel,
+  WEEKDAYS,
+  type CalEntry,
+} from "./calendar";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -37,10 +45,12 @@ export function CalendarView() {
   const [month, setMonth] = useState(now.getMonth()); // 0-indexed
   const [configuring, setConfiguring] = useState(false);
   const [addFor, setAddFor] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const today = todayStr();
   const monthKey = `${year}-${pad2(month + 1)}`;
   const cells = monthMatrix(year, month);
+  const { overdue, days } = buildUpcoming(byDate, today);
 
   const prev = () => {
     if (month === 0) { setYear(year - 1); setMonth(11); }
@@ -132,31 +142,48 @@ export function CalendarView() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col p-7">
-        {/* Weekday header */}
-        <div className="grid grid-cols-7 border-b border-line">
-          {WEEKDAYS.map((d) => (
-            <div key={d} className="px-2 py-1.5 text-xs font-medium text-muted">
-              {d}
-            </div>
-          ))}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+        {/* Left: month grid */}
+        <div className="flex min-h-0 flex-col border-b border-line p-5 md:w-[55%] md:border-b-0 md:border-r">
+          {/* Weekday header */}
+          <div className="grid grid-cols-7 border-b border-line">
+            {WEEKDAYS.map((d) => (
+              <div key={d} className="px-2 py-1.5 text-xs font-medium text-muted">
+                {d}
+              </div>
+            ))}
+          </div>
+          {/* Day grid */}
+          <div className="grid min-h-0 flex-1 auto-rows-[minmax(4.5rem,1fr)] grid-cols-7 overflow-auto">
+            {cells.map((date) => (
+              <DayCell
+                key={date}
+                date={date}
+                inMonth={date.startsWith(monthKey)}
+                isToday={date === today}
+                selected={date === selectedDate}
+                entries={byDate.get(date) ?? []}
+                onSelect={() => setSelectedDate(date)}
+                onAdd={() => setAddFor(date)}
+                onOpenItem={selectFile}
+                onToggleEvent={toggleEvent}
+                onDeleteEvent={deleteEvent}
+              />
+            ))}
+          </div>
         </div>
-        {/* Day grid */}
-        <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-7 overflow-auto">
-          {cells.map((date) => (
-            <DayCell
-              key={date}
-              date={date}
-              inMonth={date.startsWith(monthKey)}
-              isToday={date === today}
-              entries={byDate.get(date) ?? []}
-              onAdd={() => setAddFor(date)}
-              onOpenItem={selectFile}
-              onToggleEvent={toggleEvent}
-              onDeleteEvent={deleteEvent}
-            />
-          ))}
-        </div>
+
+        {/* Right: upcoming agenda */}
+        <UpcomingList
+          overdue={overdue}
+          days={days}
+          today={today}
+          selectedDate={selectedDate}
+          onOpenItem={selectFile}
+          onToggleEvent={toggleEvent}
+          onDeleteEvent={deleteEvent}
+          onAddToday={() => setAddFor(today)}
+        />
       </div>
 
       {configuring && (
@@ -188,7 +215,9 @@ function DayCell({
   date,
   inMonth,
   isToday,
+  selected,
   entries,
+  onSelect,
   onAdd,
   onOpenItem,
   onToggleEvent,
@@ -197,18 +226,27 @@ function DayCell({
   date: string;
   inMonth: boolean;
   isToday: boolean;
+  selected: boolean;
   entries: CalEntry[];
+  onSelect: () => void;
   onAdd: () => void;
   onOpenItem: (path: string) => void;
   onToggleEvent: (id: string) => void;
   onDeleteEvent: (id: string) => void;
 }) {
   const dayNum = Number(date.slice(8, 10));
+  // Inner controls (open / toggle / delete / add) shouldn't also re-select the day.
+  const stop =
+    (fn: () => void) => (e: React.MouseEvent) => {
+      e.stopPropagation();
+      fn();
+    };
   return (
     <div
-      className={`group flex min-h-24 flex-col gap-1 border-b border-r border-line p-1.5 ${
+      onClick={onSelect}
+      className={`group flex cursor-pointer flex-col gap-1 border-b border-r border-line p-1.5 ${
         inMonth ? "" : "bg-raised/30 text-muted"
-      }`}
+      } ${selected ? "ring-1 ring-inset ring-accent" : ""}`}
     >
       <div className="flex items-center justify-between">
         <span
@@ -223,7 +261,7 @@ function DayCell({
           {dayNum}
         </span>
         <button
-          onClick={onAdd}
+          onClick={stop(onAdd)}
           aria-label={`Add to ${date}`}
           className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-raised hover:text-fg group-hover:opacity-100"
         >
@@ -231,41 +269,173 @@ function DayCell({
         </button>
       </div>
       <div className="flex flex-col gap-0.5">
-        {entries.map((entry, i) =>
-          entry.kind === "item" ? (
-            <button
-              key={`i-${entry.path}-${entry.field}`}
-              onClick={() => onOpenItem(entry.path)}
-              title={`${entry.title} (${entry.field})`}
-              className="truncate rounded bg-accent-soft px-1.5 py-0.5 text-left text-xs text-accent-soft-fg transition-colors hover:bg-accent hover:text-accent-fg"
+        {entries.map((entry, i) => (
+          <EntryRow
+            key={entry.kind === "item" ? `i-${entry.path}-${entry.field}` : `e-${entry.event.id}-${i}`}
+            entry={entry}
+            onOpenItem={(p) => stop(() => onOpenItem(p))}
+            onToggleEvent={(id) => stop(() => onToggleEvent(id))}
+            onDeleteEvent={(id) => stop(() => onDeleteEvent(id))}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One item or event, rendered identically in the grid cells and the agenda list.
+ *  The `on*` props return a click handler so callers can wrap it (e.g. stopPropagation
+ *  inside a clickable day cell). */
+function EntryRow({
+  entry,
+  onOpenItem,
+  onToggleEvent,
+  onDeleteEvent,
+}: {
+  entry: CalEntry;
+  onOpenItem: (path: string) => (e: React.MouseEvent) => void;
+  onToggleEvent: (id: string) => (e: React.MouseEvent) => void;
+  onDeleteEvent: (id: string) => (e: React.MouseEvent) => void;
+}) {
+  if (entry.kind === "item") {
+    return (
+      <button
+        onClick={onOpenItem(entry.path)}
+        title={`${entry.title} (${entry.field})`}
+        className="truncate rounded bg-accent-soft px-1.5 py-0.5 text-left text-xs text-accent-soft-fg transition-colors hover:bg-accent hover:text-accent-fg"
+      >
+        {entry.title}
+      </button>
+    );
+  }
+  return (
+    <div className="group/ev flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-xs">
+      <button
+        onClick={onToggleEvent(entry.event.id)}
+        title="Toggle done"
+        className={`min-w-0 flex-1 truncate text-left ${
+          entry.event.done ? "text-muted line-through" : "text-fg"
+        }`}
+      >
+        {entry.event.title}
+      </button>
+      <button
+        onClick={onDeleteEvent(entry.event.id)}
+        aria-label="Delete event"
+        className="shrink-0 rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-danger group-hover/ev:opacity-100"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
+function UpcomingList({
+  overdue,
+  days,
+  today,
+  selectedDate,
+  onOpenItem,
+  onToggleEvent,
+  onDeleteEvent,
+  onAddToday,
+}: {
+  overdue: CalEntry[];
+  days: { date: string; entries: CalEntry[] }[];
+  today: string;
+  selectedDate: string | null;
+  onOpenItem: (path: string) => void;
+  onToggleEvent: (id: string) => void;
+  onDeleteEvent: (id: string) => void;
+  onAddToday: () => void;
+}) {
+  const sectionRefs = useRef(new Map<string, HTMLElement>());
+
+  // Scroll the picked day into view when a grid cell is selected.
+  useEffect(() => {
+    if (!selectedDate) return;
+    sectionRefs.current
+      .get(selectedDate)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [selectedDate]);
+
+  // Plain (already-wrapped) handlers — no stopPropagation needed in the list.
+  const open = (p: string) => () => onOpenItem(p);
+  const toggle = (id: string) => () => onToggleEvent(id);
+  const del = (id: string) => () => onDeleteEvent(id);
+
+  const empty = overdue.length === 0 && days.length === 0;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
+      <div className="mb-3 flex items-center gap-2">
+        <CalendarClock size={15} className="text-muted" />
+        <h2 className="text-sm font-semibold">Upcoming</h2>
+      </div>
+
+      {empty ? (
+        <div className="mt-6 flex flex-col items-center gap-2 text-center">
+          <p className="text-sm text-muted">Nothing scheduled.</p>
+          <button
+            onClick={onAddToday}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-accent hover:text-accent"
+          >
+            <Plus size={14} /> Add to today
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {overdue.length > 0 && (
+            <section>
+              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-danger">
+                Overdue · {overdue.length}
+              </h3>
+              <div className="flex flex-col gap-1">
+                {overdue.map((entry, i) => (
+                  <EntryRow
+                    key={entry.kind === "item" ? `i-${entry.path}-${entry.field}` : `e-${entry.event.id}-${i}`}
+                    entry={entry}
+                    onOpenItem={open}
+                    onToggleEvent={toggle}
+                    onDeleteEvent={del}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+          {days.map(({ date, entries }) => (
+            <section
+              key={date}
+              ref={(el) => {
+                if (el) sectionRefs.current.set(date, el);
+                else sectionRefs.current.delete(date);
+              }}
+              className={`-mx-1.5 rounded-md px-1.5 py-1 ${
+                date === selectedDate ? "bg-accent-soft/50" : ""
+              }`}
             >
-              {entry.title}
-            </button>
-          ) : (
-            <div
-              key={`e-${entry.event.id}-${i}`}
-              className="group/ev flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-xs"
-            >
-              <button
-                onClick={() => onToggleEvent(entry.event.id)}
-                title="Toggle done"
-                className={`min-w-0 flex-1 truncate text-left ${
-                  entry.event.done ? "text-muted line-through" : "text-fg"
+              <h3
+                className={`mb-1.5 text-xs font-semibold uppercase tracking-wide ${
+                  date === today ? "text-accent" : "text-muted"
                 }`}
               >
-                {entry.event.title}
-              </button>
-              <button
-                onClick={() => onDeleteEvent(entry.event.id)}
-                aria-label="Delete event"
-                className="shrink-0 rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-danger group-hover/ev:opacity-100"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ),
-        )}
-      </div>
+                {dayLabel(date, today)}
+              </h3>
+              <div className="flex flex-col gap-1">
+                {entries.map((entry, i) => (
+                  <EntryRow
+                    key={entry.kind === "item" ? `i-${entry.path}-${entry.field}` : `e-${entry.event.id}-${i}`}
+                    entry={entry}
+                    onOpenItem={open}
+                    onToggleEvent={toggle}
+                    onDeleteEvent={del}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -146,6 +146,46 @@ export function buildAgenda(
   return { overdue, today: todayList, thisWeek };
 }
 
+/** One day's worth of open entries, for the per-day agenda list. */
+export interface DaySection {
+  date: string;
+  entries: CalEntry[];
+}
+
+/** Forward-looking agenda: everything still open from `today` onward, plus a
+ *  separate overdue bucket. `days` holds only dates that actually have open
+ *  entries (empty days are skipped), ascending; `overdue` is date-ordered. */
+export function buildUpcoming(
+  byDate: Map<string, CalEntry[]>,
+  today: string,
+): { overdue: CalEntry[]; days: DaySection[] } {
+  const overdue: CalEntry[] = [];
+  const days: DaySection[] = [];
+
+  for (const date of [...byDate.keys()].sort()) {
+    const open = byDate.get(date)!.filter(isOpen);
+    if (open.length === 0) continue;
+    if (date < today) overdue.push(...open);
+    else days.push({ date, entries: open });
+  }
+  return { overdue, days };
+}
+
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/** Human label for an agenda date header: "Today" / "Tomorrow" / "Thu Jun 26". */
+export function dayLabel(date: string, today: string): string {
+  if (date === today) return "Today";
+  if (date === addDays(today, 1)) return "Tomorrow";
+  const [y, m, d] = date.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return `${WEEKDAY_NAMES[dt.getUTCDay()]} ${MONTH_NAMES[m - 1]} ${d}`;
+}
+
 // ---- Date math on `YYYY-MM-DD` (UTC, so no DST drift) -------------------
 
 function fmtUTC(d: Date): string {

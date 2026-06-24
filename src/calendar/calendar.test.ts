@@ -3,6 +3,8 @@ import {
   dateFieldsFor,
   groupByDate,
   buildAgenda,
+  buildUpcoming,
+  dayLabel,
   monthMatrix,
   addDays,
   isDateStr,
@@ -109,6 +111,50 @@ describe("buildAgenda", () => {
   it("excludes completed events everywhere", () => {
     const all = [...agenda.overdue, ...agenda.today, ...agenda.thisWeek];
     expect(all.some((e) => e.kind === "event" && e.event.title === "Done")).toBe(false);
+  });
+});
+
+describe("buildUpcoming", () => {
+  const cal: Calendar = {
+    dateFields: [],
+    events: [
+      { id: "e1", title: "Soon", date: "2026-06-27" },
+      { id: "e2", title: "Done", date: "2026-06-24", done: true },
+      { id: "e3", title: "FarOff", date: "2026-07-30" },
+    ],
+  };
+  const byDate = groupByDate(items, cal, dateFieldsFor(schema, cal));
+  const { overdue, days } = buildUpcoming(byDate, "2026-06-24");
+
+  it("collects open entries before today into overdue, date-ordered", () => {
+    expect(overdue.map((e) => (e.kind === "item" ? e.title : e.event.title))).toEqual([
+      "Beta", // 06-10
+      "Alpha", // 06-20 (start)
+    ]);
+  });
+
+  it("lists only dates from today onward that have open entries", () => {
+    expect(days.map((d) => d.date)).toEqual(["2026-06-24", "2026-06-27", "2026-07-30"]);
+  });
+
+  it("excludes completed events and skips empty days", () => {
+    // Today (06-24) keeps Alpha (item) but drops the done event.
+    const today = days.find((d) => d.date === "2026-06-24")!;
+    expect(today.entries.map((e) => (e.kind === "item" ? e.title : e.event.title))).toEqual([
+      "Alpha",
+    ]);
+    expect([...overdue, ...days.flatMap((d) => d.entries)].some(
+      (e) => e.kind === "event" && e.event.title === "Done",
+    )).toBe(false);
+  });
+});
+
+describe("dayLabel", () => {
+  it("labels today and tomorrow specially, else a short date", () => {
+    expect(dayLabel("2026-06-24", "2026-06-24")).toBe("Today");
+    expect(dayLabel("2026-06-25", "2026-06-24")).toBe("Tomorrow");
+    expect(dayLabel("2026-06-26", "2026-06-24")).toBe("Fri Jun 26");
+    expect(dayLabel("2026-07-01", "2026-06-24")).toBe("Wed Jul 1");
   });
 });
 

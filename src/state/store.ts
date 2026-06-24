@@ -52,10 +52,7 @@ import {
 } from "../banners/banners";
 import {
   ensureFavicon,
-  saveFavicon,
   defaultFavicon,
-  writeFaviconImage,
-  deleteFaviconImage,
   type Favicon,
 } from "../favicon/favicon";
 import {
@@ -132,8 +129,6 @@ interface TrackerState {
   dismissAgenda: (date: string) => void;
   setBanner: (key: string, file: File) => Promise<void>;
   removeBanner: (key: string) => Promise<void>;
-  setFavicon: (file: File) => Promise<void>;
-  removeFavicon: () => Promise<void>;
   exportConfig: () => Promise<ConfigBundle>;
   importConfig: (bundle: ConfigBundle) => Promise<void>;
   newFile: (parentPath: string, name: string) => Promise<string | null>;
@@ -399,33 +394,6 @@ export const useStore = create<TrackerState>((set, get) => {
       await saveBanners(handle, next);
       if (prev) await deleteBannerImage(handle, prev);
       set({ banners: next, bannersRev: get().bannersRev + 1 });
-    },
-
-    /** Set (or replace) the workspace's custom tab favicon. Writes the image
-     *  into `.tracker/favicon-images/` and records its filename in
-     *  `favicon.json`. A prior image with a different name is removed. */
-    async setFavicon(file) {
-      const handle = get().rootHandle;
-      if (!handle) return;
-      const name = `favicon.${extForType(file.type)}`;
-      const prev = get().favicon.favicon;
-      await writeFaviconImage(handle, name, file);
-      const next: Favicon = { favicon: name };
-      await saveFavicon(handle, next);
-      if (prev && prev !== name) await deleteFaviconImage(handle, prev);
-      set({ favicon: next });
-    },
-
-    /** Remove the custom favicon: clear `favicon.json` and delete the image
-     *  file (best-effort). The tab reverts to the bundled default icon. */
-    async removeFavicon() {
-      const handle = get().rootHandle;
-      if (!handle) return;
-      const prev = get().favicon.favicon;
-      const next: Favicon = { favicon: null };
-      await saveFavicon(handle, next);
-      if (prev) await deleteFaviconImage(handle, prev);
-      set({ favicon: next });
     },
 
     /** Gather the current config (schema, dashboard, phrases + images) into a

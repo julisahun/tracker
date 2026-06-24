@@ -1,10 +1,4 @@
-import {
-  readFile,
-  createFile,
-  createDirectory,
-  createFileFromBlob,
-  deleteEntry,
-} from "../fs/directory";
+import { readFile, createFile, createDirectory } from "../fs/directory";
 
 // The custom browser-tab favicon for a workspace. Like the schema, dashboard,
 // phrases and banners config, the chosen image's filename lives on disk at
@@ -91,31 +85,4 @@ export async function ensureFavicon(
     /* read-only or permission issue — fall back to in-memory defaults */
   }
   return seed;
-}
-
-// ---- Image IO ----------------------------------------------------------
-
-/** Write a favicon image blob into `.tracker/favicon-images/` under `name`. */
-export async function writeFaviconImage(
-  root: FileSystemDirectoryHandle,
-  name: string,
-  blob: Blob,
-): Promise<void> {
-  const dir = await createDirectory(root, SCHEMA_DIR);
-  const imagesDir = await createDirectory(dir, FAVICON_IMAGES_DIR);
-  await createFileFromBlob(imagesDir, name, blob);
-}
-
-/** Best-effort delete of a favicon image; ignores a missing file. */
-export async function deleteFaviconImage(
-  root: FileSystemDirectoryHandle,
-  name: string,
-): Promise<void> {
-  try {
-    const dir = await root.getDirectoryHandle(SCHEMA_DIR);
-    const imagesDir = await dir.getDirectoryHandle(FAVICON_IMAGES_DIR);
-    await deleteEntry(imagesDir, name, false);
-  } catch {
-    /* already gone or read-only */
-  }
 }
