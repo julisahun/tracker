@@ -8,6 +8,7 @@ import { MetricCard } from "./MetricCard";
 import { DashboardEditor } from "./DashboardEditor";
 import { PhraseBanner } from "../phrases/PhraseBanner";
 import { Banner } from "../banners/Banner";
+import { FolderNote } from "./FolderNote";
 
 export function Dashboard() {
   const tree = useStore((s) => s.tree);
@@ -109,6 +110,7 @@ export function Dashboard() {
             ))}
           </div>
         )}
+        <FolderNote key={dashboardScope ?? "__root__"} scope={dashboardScope} />
       </div>
 
       {editing && (

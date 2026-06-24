@@ -19,6 +19,19 @@ export function isItemFile(name: string): boolean {
   return name.toLowerCase().endsWith(".md");
 }
 
+/** Per-folder "main" note: a description shown below the folder's dashboard. */
+export const FOLDER_NOTE_NAME = "index.md";
+
+/** Whether `name` is the folder note (not a tracked item). */
+export function isFolderNote(name: string): boolean {
+  return name.toLowerCase() === FOLDER_NOTE_NAME;
+}
+
+/** Tree predicate: trackable items, minus the per-folder note. */
+export function isTrackedItem(name: string): boolean {
+  return isItemFile(name) && !isFolderNote(name);
+}
+
 export async function pickRootDirectory(): Promise<FileSystemDirectoryHandle> {
   return window.showDirectoryPicker({ mode: "readwrite", id: "tracker-root" });
 }
@@ -66,7 +79,7 @@ function sortNodes(nodes: TreeNode[]): TreeNode[] {
  */
 export async function buildTree(
   dir: FileSystemDirectoryHandle,
-  keep: (name: string) => boolean = isItemFile,
+  keep: (name: string) => boolean = isTrackedItem,
   parentPath = "",
 ): Promise<TreeNode[]> {
   const nodes: TreeNode[] = [];
