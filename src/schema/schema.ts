@@ -207,6 +207,30 @@ export async function collectFrontmatters(
   return out;
 }
 
+/** Like `collectFrontmatters`, but keeps each item's tree path so callers can
+ *  open the file (used by the calendar to plot and jump to dated items). */
+export async function collectItemFrontmatters(
+  tree: TreeNode[],
+): Promise<{ path: string; frontmatter: Frontmatter }[]> {
+  const out: { path: string; frontmatter: Frontmatter }[] = [];
+  const walk = async (nodes: TreeNode[]) => {
+    for (const node of nodes) {
+      if (node.kind === "directory") {
+        if (node.children) await walk(node.children);
+      } else {
+        try {
+          const raw = await readFile(node.handle as FileSystemFileHandle);
+          out.push({ path: node.path, frontmatter: parseFrontmatter(raw).frontmatter });
+        } catch {
+          /* ignore unreadable files */
+        }
+      }
+    }
+  };
+  await walk(tree);
+  return out;
+}
+
 /** Return the saved schema, or infer + persist one if none exists yet. */
 export async function ensureSchema(
   root: FileSystemDirectoryHandle,

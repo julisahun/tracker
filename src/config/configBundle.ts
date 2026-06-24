@@ -18,6 +18,7 @@ import { saveSchema, type Schema } from "../schema/schema";
 import { saveDashboard, type Dashboard } from "../dashboard/dashboard";
 import { savePhrases, PHRASE_IMAGES_DIR, type Phrases } from "../phrases/phrases";
 import { saveBanners, BANNER_IMAGES_DIR, type Banners } from "../banners/banners";
+import { saveCalendar, type Calendar } from "../calendar/calendar";
 
 const TRACKER_DIR = ".tracker";
 /** Marker so we can recognize (and reject non-) config bundles on import. */
@@ -42,6 +43,7 @@ export interface ConfigBundle {
   dashboard?: Dashboard;
   phrases?: Phrases;
   banners?: Banners;
+  calendar?: Calendar;
   images?: BundleImage[];
 }
 
@@ -50,6 +52,7 @@ export interface BundleParts {
   dashboard?: Dashboard;
   phrases?: Phrases;
   banners?: Banners;
+  calendar?: Calendar;
   images?: BundleImage[];
   exportedAt: string;
 }
@@ -74,6 +77,7 @@ export function makeBundle(parts: BundleParts): ConfigBundle {
   if (parts.dashboard) bundle.dashboard = parts.dashboard;
   if (parts.phrases) bundle.phrases = parts.phrases;
   if (parts.banners) bundle.banners = parts.banners;
+  if (parts.calendar) bundle.calendar = parts.calendar;
   if (parts.images && parts.images.length) bundle.images = parts.images;
   return bundle;
 }
@@ -124,7 +128,7 @@ export function parseBundle(raw: string): ParseResult {
     };
   }
 
-  const { schema, dashboard, phrases, banners, images } = parsed;
+  const { schema, dashboard, phrases, banners, calendar, images } = parsed;
   if (schema !== undefined && !(isObject(schema) && Array.isArray(schema.fields))) {
     return { ok: false, error: "Config has a malformed schema." };
   }
@@ -146,6 +150,12 @@ export function parseBundle(raw: string): ParseResult {
   ) {
     return { ok: false, error: "Config has malformed banners." };
   }
+  if (
+    calendar !== undefined &&
+    !(isObject(calendar) && Array.isArray(calendar.events))
+  ) {
+    return { ok: false, error: "Config has a malformed calendar." };
+  }
   if (images !== undefined && !validImages(images)) {
     return { ok: false, error: "Config has malformed images." };
   }
@@ -153,7 +163,8 @@ export function parseBundle(raw: string): ParseResult {
     schema === undefined &&
     dashboard === undefined &&
     phrases === undefined &&
-    banners === undefined
+    banners === undefined &&
+    calendar === undefined
   ) {
     return { ok: false, error: "Config has nothing to import." };
   }
@@ -250,5 +261,6 @@ export async function applyBundle(
   if (bundle.dashboard) await saveDashboard(root, bundle.dashboard);
   if (bundle.phrases) await savePhrases(root, bundle.phrases);
   if (bundle.banners) await saveBanners(root, bundle.banners);
+  if (bundle.calendar) await saveCalendar(root, bundle.calendar);
   if (bundle.images?.length) await writeBundleImages(root, bundle.images);
 }

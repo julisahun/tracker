@@ -5,6 +5,7 @@ import {
   RefreshCw,
   ListChecks,
   LayoutDashboard,
+  CalendarDays,
   SlidersHorizontal,
   Save,
 } from "lucide-react";
@@ -96,6 +97,17 @@ export function Sidebar() {
             >
               <LayoutDashboard size={15} className="shrink-0" />
               Dashboard
+            </button>
+            <button
+              onClick={() => showHome("calendar")}
+              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-colors ${
+                onHome && homeView === "calendar"
+                  ? "bg-accent text-accent-fg"
+                  : "text-muted hover:bg-raised hover:text-fg"
+              }`}
+            >
+              <CalendarDays size={15} className="shrink-0" />
+              Calendar
             </button>
             <button
               onClick={() => showHome("schema")}

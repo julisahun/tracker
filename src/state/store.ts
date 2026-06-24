@@ -35,6 +35,12 @@ import {
 } from "../dashboard/dashboard";
 import { ensurePhrases, defaultPhrases, type Phrases } from "../phrases/phrases";
 import {
+  ensureCalendar,
+  saveCalendar,
+  defaultCalendar,
+  type Calendar,
+} from "../calendar/calendar";
+import {
   ensureBanners,
   saveBanners,
   defaultBanners,
@@ -59,7 +65,7 @@ export type FolderStatus =
   | "denied"; // permission to a remembered folder was refused
 
 /** Which screen fills the main pane when no item file is selected. */
-export type HomeView = "dashboard" | "schema";
+export type HomeView = "dashboard" | "schema" | "calendar";
 
 /** An unsaved, in-memory edit to a single item, keyed by path in `drafts`. */
 export interface FileDraft {
@@ -84,6 +90,10 @@ interface TrackerState {
   phrases: Phrases;
   /** Image banners keyed by scope (`""` = root, else a folder path). */
   banners: Banners;
+  /** Calendar config: which date fields to project + standalone events. */
+  calendar: Calendar;
+  /** Day (`YYYY-MM-DD`) the agenda banner was dismissed on; reappears next day. */
+  dismissedAgendaDate: string | null;
   canReopen: boolean;
   /** Unsaved edits across any number of files; flushed together by `saveAll`. */
   drafts: Record<string, FileDraft>;
@@ -105,6 +115,8 @@ interface TrackerState {
   saveAll: () => Promise<void>;
   updateSchema: (next: Schema) => Promise<void>;
   updateDashboard: (next: Dashboard) => Promise<void>;
+  updateCalendar: (next: Calendar) => Promise<void>;
+  dismissAgenda: (date: string) => void;
   setBanner: (key: string, file: File) => Promise<void>;
   removeBanner: (key: string) => Promise<void>;
   exportConfig: () => Promise<ConfigBundle>;
@@ -156,6 +168,7 @@ export const useStore = create<TrackerState>((set, get) => {
     const tree = applyOrder(built, order);
     const phrases = await ensurePhrases(handle);
     const banners = await ensureBanners(handle);
+    const calendar = await ensureCalendar(handle);
     const searchIndex = await buildSearchIndex(tree);
     set({
       status: "ready",
@@ -167,6 +180,7 @@ export const useStore = create<TrackerState>((set, get) => {
       order,
       phrases,
       banners,
+      calendar,
       searchIndex,
       drafts: {},
     });
@@ -186,6 +200,8 @@ export const useStore = create<TrackerState>((set, get) => {
     order: {},
     phrases: defaultPhrases(),
     banners: defaultBanners(),
+    calendar: defaultCalendar(),
+    dismissedAgendaDate: null,
     canReopen: false,
     drafts: {},
     saving: false,
@@ -325,6 +341,16 @@ export const useStore = create<TrackerState>((set, get) => {
       set({ dashboard: next });
     },
 
+    async updateCalendar(next) {
+      const handle = get().rootHandle;
+      if (handle) await saveCalendar(handle, next);
+      set({ calendar: next });
+    },
+
+    dismissAgenda(date) {
+      set({ dismissedAgendaDate: date });
+    },
+
     /** Set (or replace) the banner image for a scope key (`""` = root). Writes
      *  the image into `.tracker/banner-images/` and records its filename in
      *  `banners.json`. A prior image with a different name is removed. */
@@ -360,13 +386,14 @@ export const useStore = create<TrackerState>((set, get) => {
      *  portable bundle. Configs come from in-memory state so unsaved config
      *  edits are included; images are read fresh from disk. */
     async exportConfig() {
-      const { rootHandle, schema, dashboard, phrases, banners } = get();
+      const { rootHandle, schema, dashboard, phrases, banners, calendar } = get();
       const images = rootHandle ? await readBundleImages(rootHandle) : [];
       return makeBundle({
         schema,
         dashboard,
         phrases,
         banners,
+        calendar,
         images,
         exportedAt: new Date().toISOString(),
       });
@@ -383,6 +410,7 @@ export const useStore = create<TrackerState>((set, get) => {
         dashboard: bundle.dashboard ?? s.dashboard,
         phrases: bundle.phrases ?? s.phrases,
         banners: bundle.banners ?? s.banners,
+        calendar: bundle.calendar ?? s.calendar,
       }));
       // Rebuild the search index in case the schema (indexed fields) changed.
       await get().refreshTree();
