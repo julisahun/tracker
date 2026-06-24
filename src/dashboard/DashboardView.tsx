@@ -8,6 +8,7 @@ import { MetricCard } from "./MetricCard";
 import { DashboardEditor } from "./DashboardEditor";
 import { PhraseBanner } from "../phrases/PhraseBanner";
 import { Banner } from "../banners/Banner";
+import { FaviconControl } from "../favicon/FaviconControl";
 import { FolderNote } from "./FolderNote";
 
 export function Dashboard() {
@@ -83,6 +84,11 @@ export function Dashboard() {
         <div className="mb-6">
           <Banner scopeKey={dashboardScope ?? ""} editable />
         </div>
+        {!dashboardScope && (
+          <div className="mb-6">
+            <FaviconControl />
+          </div>
+        )}
         <PhraseBanner />
         {metrics.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">

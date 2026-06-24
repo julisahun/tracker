@@ -51,6 +51,14 @@ import {
   type Banners,
 } from "../banners/banners";
 import {
+  ensureFavicon,
+  saveFavicon,
+  defaultFavicon,
+  writeFaviconImage,
+  deleteFaviconImage,
+  type Favicon,
+} from "../favicon/favicon";
+import {
   makeBundle,
   applyBundle,
   readBundleImages,
@@ -90,6 +98,8 @@ interface TrackerState {
   phrases: Phrases;
   /** Image banners keyed by scope (`""` = root, else a folder path). */
   banners: Banners;
+  /** Custom browser-tab favicon for the workspace (one per folder). */
+  favicon: Favicon;
   /** Calendar config: which date fields to project + standalone events. */
   calendar: Calendar;
   /** Day (`YYYY-MM-DD`) the agenda banner was dismissed on; reappears next day. */
@@ -119,6 +129,8 @@ interface TrackerState {
   dismissAgenda: (date: string) => void;
   setBanner: (key: string, file: File) => Promise<void>;
   removeBanner: (key: string) => Promise<void>;
+  setFavicon: (file: File) => Promise<void>;
+  removeFavicon: () => Promise<void>;
   exportConfig: () => Promise<ConfigBundle>;
   importConfig: (bundle: ConfigBundle) => Promise<void>;
   newFile: (parentPath: string, name: string) => Promise<string | null>;
@@ -168,6 +180,7 @@ export const useStore = create<TrackerState>((set, get) => {
     const tree = applyOrder(built, order);
     const phrases = await ensurePhrases(handle);
     const banners = await ensureBanners(handle);
+    const favicon = await ensureFavicon(handle);
     const calendar = await ensureCalendar(handle);
     const searchIndex = await buildSearchIndex(tree);
     set({
@@ -180,6 +193,7 @@ export const useStore = create<TrackerState>((set, get) => {
       order,
       phrases,
       banners,
+      favicon,
       calendar,
       searchIndex,
       drafts: {},
@@ -200,6 +214,7 @@ export const useStore = create<TrackerState>((set, get) => {
     order: {},
     phrases: defaultPhrases(),
     banners: defaultBanners(),
+    favicon: defaultFavicon(),
     calendar: defaultCalendar(),
     dismissedAgendaDate: null,
     canReopen: false,
@@ -382,17 +397,46 @@ export const useStore = create<TrackerState>((set, get) => {
       set({ banners: next });
     },
 
+    /** Set (or replace) the workspace's custom tab favicon. Writes the image
+     *  into `.tracker/favicon-images/` and records its filename in
+     *  `favicon.json`. A prior image with a different name is removed. */
+    async setFavicon(file) {
+      const handle = get().rootHandle;
+      if (!handle) return;
+      const name = `favicon.${extForType(file.type)}`;
+      const prev = get().favicon.favicon;
+      await writeFaviconImage(handle, name, file);
+      const next: Favicon = { favicon: name };
+      await saveFavicon(handle, next);
+      if (prev && prev !== name) await deleteFaviconImage(handle, prev);
+      set({ favicon: next });
+    },
+
+    /** Remove the custom favicon: clear `favicon.json` and delete the image
+     *  file (best-effort). The tab reverts to the bundled default icon. */
+    async removeFavicon() {
+      const handle = get().rootHandle;
+      if (!handle) return;
+      const prev = get().favicon.favicon;
+      const next: Favicon = { favicon: null };
+      await saveFavicon(handle, next);
+      if (prev) await deleteFaviconImage(handle, prev);
+      set({ favicon: next });
+    },
+
     /** Gather the current config (schema, dashboard, phrases + images) into a
      *  portable bundle. Configs come from in-memory state so unsaved config
      *  edits are included; images are read fresh from disk. */
     async exportConfig() {
-      const { rootHandle, schema, dashboard, phrases, banners, calendar } = get();
+      const { rootHandle, schema, dashboard, phrases, banners, favicon, calendar } =
+        get();
       const images = rootHandle ? await readBundleImages(rootHandle) : [];
       return makeBundle({
         schema,
         dashboard,
         phrases,
         banners,
+        favicon,
         calendar,
         images,
         exportedAt: new Date().toISOString(),
@@ -410,6 +454,7 @@ export const useStore = create<TrackerState>((set, get) => {
         dashboard: bundle.dashboard ?? s.dashboard,
         phrases: bundle.phrases ?? s.phrases,
         banners: bundle.banners ?? s.banners,
+        favicon: bundle.favicon ?? s.favicon,
         calendar: bundle.calendar ?? s.calendar,
       }));
       // Rebuild the search index in case the schema (indexed fields) changed.

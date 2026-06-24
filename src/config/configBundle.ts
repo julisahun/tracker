@@ -1,6 +1,7 @@
 // Import / export of the on-disk `.tracker` config as a single portable JSON
-// bundle. A bundle gathers the config files (schema, dashboard, phrases, banners)
-// plus every image under `.tracker/phrase-images/` and `.tracker/banner-images/`
+// bundle. A bundle gathers the config files (schema, dashboard, phrases, banners,
+// favicon) plus every image under `.tracker/phrase-images/`,
+// `.tracker/banner-images/` and `.tracker/favicon-images/`
 // (base64-embedded, each tagged with its `dir`), so it round-trips a folder's
 // entire configuration without touching the tracked items themselves.
 //
@@ -18,6 +19,11 @@ import { saveSchema, type Schema } from "../schema/schema";
 import { saveDashboard, type Dashboard } from "../dashboard/dashboard";
 import { savePhrases, PHRASE_IMAGES_DIR, type Phrases } from "../phrases/phrases";
 import { saveBanners, BANNER_IMAGES_DIR, type Banners } from "../banners/banners";
+import {
+  saveFavicon,
+  FAVICON_IMAGES_DIR,
+  type Favicon,
+} from "../favicon/favicon";
 import { saveCalendar, type Calendar } from "../calendar/calendar";
 
 const TRACKER_DIR = ".tracker";
@@ -43,6 +49,7 @@ export interface ConfigBundle {
   dashboard?: Dashboard;
   phrases?: Phrases;
   banners?: Banners;
+  favicon?: Favicon;
   calendar?: Calendar;
   images?: BundleImage[];
 }
@@ -52,6 +59,7 @@ export interface BundleParts {
   dashboard?: Dashboard;
   phrases?: Phrases;
   banners?: Banners;
+  favicon?: Favicon;
   calendar?: Calendar;
   images?: BundleImage[];
   exportedAt: string;
@@ -77,6 +85,7 @@ export function makeBundle(parts: BundleParts): ConfigBundle {
   if (parts.dashboard) bundle.dashboard = parts.dashboard;
   if (parts.phrases) bundle.phrases = parts.phrases;
   if (parts.banners) bundle.banners = parts.banners;
+  if (parts.favicon) bundle.favicon = parts.favicon;
   if (parts.calendar) bundle.calendar = parts.calendar;
   if (parts.images && parts.images.length) bundle.images = parts.images;
   return bundle;
@@ -128,7 +137,8 @@ export function parseBundle(raw: string): ParseResult {
     };
   }
 
-  const { schema, dashboard, phrases, banners, calendar, images } = parsed;
+  const { schema, dashboard, phrases, banners, favicon, calendar, images } =
+    parsed;
   if (schema !== undefined && !(isObject(schema) && Array.isArray(schema.fields))) {
     return { ok: false, error: "Config has a malformed schema." };
   }
@@ -151,6 +161,15 @@ export function parseBundle(raw: string): ParseResult {
     return { ok: false, error: "Config has malformed banners." };
   }
   if (
+    favicon !== undefined &&
+    !(
+      isObject(favicon) &&
+      (typeof favicon.favicon === "string" || favicon.favicon === null)
+    )
+  ) {
+    return { ok: false, error: "Config has a malformed favicon." };
+  }
+  if (
     calendar !== undefined &&
     !(isObject(calendar) && Array.isArray(calendar.events))
   ) {
@@ -164,6 +183,7 @@ export function parseBundle(raw: string): ParseResult {
     dashboard === undefined &&
     phrases === undefined &&
     banners === undefined &&
+    favicon === undefined &&
     calendar === undefined
   ) {
     return { ok: false, error: "Config has nothing to import." };
@@ -220,13 +240,14 @@ async function readImagesFrom(
   return images;
 }
 
-/** Read all bundled config images (phrase + banner) as base64 entries. */
+/** Read all bundled config images (phrase + banner + favicon) as base64 entries. */
 export async function readBundleImages(
   root: FileSystemDirectoryHandle,
 ): Promise<BundleImage[]> {
   const phrase = await readImagesFrom(root, PHRASE_IMAGES_DIR);
   const banner = await readImagesFrom(root, BANNER_IMAGES_DIR);
-  return [...phrase, ...banner];
+  const favicon = await readImagesFrom(root, FAVICON_IMAGES_DIR);
+  return [...phrase, ...banner, ...favicon];
 }
 
 /** Write bundled images back into their `.tracker` subfolder. Entries with no
@@ -261,6 +282,7 @@ export async function applyBundle(
   if (bundle.dashboard) await saveDashboard(root, bundle.dashboard);
   if (bundle.phrases) await savePhrases(root, bundle.phrases);
   if (bundle.banners) await saveBanners(root, bundle.banners);
+  if (bundle.favicon) await saveFavicon(root, bundle.favicon);
   if (bundle.calendar) await saveCalendar(root, bundle.calendar);
   if (bundle.images?.length) await writeBundleImages(root, bundle.images);
 }

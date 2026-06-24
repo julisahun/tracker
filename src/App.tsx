@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Breadcrumbs } from "./tree/Breadcrumbs";
 import { ItemEditor } from "./editor/ItemEditor";
 import { Banner } from "./banners/Banner";
+import { useFaviconLink } from "./favicon/useFaviconLink";
 import { Dashboard } from "./dashboard/DashboardView";
 import { SchemaView } from "./schema/SchemaView";
 import { CalendarView } from "./calendar/CalendarView";
@@ -21,6 +22,9 @@ export default function App() {
   const selectedPath = useStore((s) => s.selectedPath);
   const homeView = useStore((s) => s.homeView);
   const dirtyCount = useStore((s) => Object.keys(s.drafts).length);
+
+  // Keep the browser-tab favicon in sync with the open workspace.
+  useFaviconLink();
 
   useEffect(() => {
     void init();
