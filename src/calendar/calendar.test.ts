@@ -6,6 +6,8 @@ import {
   buildUpcoming,
   dayLabel,
   monthMatrix,
+  weekMatrix,
+  weekRangeLabel,
   addDays,
   isDateStr,
   itemTitle,
@@ -182,5 +184,45 @@ describe("monthMatrix", () => {
     const cells = monthMatrix(2026, 0); // Jan 2026 — Jan 1 is a Thursday
     expect(cells[0]).toBe("2025-12-29"); // Monday before
     expect(cells).toContain("2026-01-01");
+  });
+});
+
+describe("weekMatrix", () => {
+  it("returns 7 Monday-first contiguous days", () => {
+    const cells = weekMatrix("2026-06-24"); // Wednesday
+    expect(cells).toHaveLength(7);
+    expect(cells[0]).toBe("2026-06-22"); // Monday
+    expect(cells[6]).toBe("2026-06-28"); // Sunday
+    expect(addDays(cells[0], 6)).toBe(cells[6]);
+  });
+
+  it("returns the same week for any day within it", () => {
+    const week = weekMatrix("2026-06-22"); // Monday
+    for (const day of week) {
+      expect(weekMatrix(day)).toEqual(week);
+    }
+  });
+
+  it("handles weeks spanning a month/year boundary", () => {
+    const cells = weekMatrix("2026-01-01"); // Thursday
+    expect(cells[0]).toBe("2025-12-29");
+    expect(cells[6]).toBe("2026-01-04");
+  });
+});
+
+describe("weekRangeLabel", () => {
+  it("collapses a same-month week to one month label", () => {
+    expect(weekRangeLabel(weekMatrix("2026-06-24"))).toBe("Jun 22 – 28, 2026");
+  });
+  it("expands the month on both sides when the week spans months", () => {
+    // Jan 29, 2026 is a Thursday → Mon Jan 26 .. Sun Feb 1, both in 2026.
+    expect(weekRangeLabel(weekMatrix("2026-01-29"))).toBe(
+      "Jan 26 – Feb 1, 2026",
+    );
+  });
+  it("expands the year on both sides when the week spans years", () => {
+    expect(weekRangeLabel(weekMatrix("2025-12-31"))).toBe(
+      "Dec 29, 2025 – Jan 4, 2026",
+    );
   });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   CalendarDays,
   ChevronLeft,
@@ -16,11 +17,16 @@ import { Checkbox } from "../components/Checkbox";
 import { useCalendarEntries } from "./useCalendarEntries";
 import {
   monthMatrix,
+  weekMatrix,
+  weekRangeLabel,
   todayStr,
+  addDays,
   buildUpcoming,
   dayLabel,
+  clampSplit,
   WEEKDAYS,
   type CalEntry,
+  type CalendarView as ViewMode,
 } from "./calendar";
 
 const MONTHS = [
@@ -29,6 +35,39 @@ const MONTHS = [
 ];
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** Inner controls shouldn't also trigger the surrounding cell/column click. */
+const stop =
+  (fn: () => void) => (e: React.MouseEvent) => {
+    e.stopPropagation();
+    fn();
+  };
+
+/** The 1st of a (possibly over/underflowing) month, as a `YYYY-MM-DD` anchor. */
+const monthAnchor = (year: number, month: number): string => {
+  const d = new Date(Date.UTC(year, month, 1));
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-01`;
+};
+
+/** Dot color in the month overview: items vs standalone events. */
+const dotClass = (entry: CalEntry): string =>
+  entry.kind === "item" ? "bg-accent" : "bg-fg/40";
+
+/** Track whether we're at the md+ (row) breakpoint, for the resizable split. */
+function useIsWide(): boolean {
+  const [wide, setWide] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(min-width: 768px)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const on = () => setWide(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return wide;
+}
 
 export function CalendarView() {
   const schema = useStore((s) => s.schema);
@@ -40,27 +79,56 @@ export function CalendarView() {
 
   const { byDate, fields, loading } = useCalendarEntries();
 
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth()); // 0-indexed
+  const view: ViewMode = calendar.view === "month" ? "month" : "week";
+  const today = todayStr();
+  const [anchor, setAnchor] = useState(today);
   const [configuring, setConfiguring] = useState(false);
   const [addFor, setAddFor] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [popover, setPopover] = useState<{ date: string; rect: DOMRect } | null>(
+    null,
+  );
 
-  const today = todayStr();
+  const isWide = useIsWide();
+  const [splitPct, setSplitPct] = useState(() =>
+    clampSplit(calendar.splitPct ?? 55),
+  );
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  const year = Number(anchor.slice(0, 4));
+  const month = Number(anchor.slice(5, 7)) - 1; // 0-indexed
   const monthKey = `${year}-${pad2(month + 1)}`;
-  const cells = monthMatrix(year, month);
+  const cells = view === "week" ? weekMatrix(anchor) : monthMatrix(year, month);
+  const title = view === "week" ? weekRangeLabel(cells) : `${MONTHS[month]} ${year}`;
   const { overdue, days } = buildUpcoming(byDate, today);
 
-  const prev = () => {
-    if (month === 0) { setYear(year - 1); setMonth(11); }
-    else setMonth(month - 1);
+  const prev = () =>
+    setAnchor(view === "week" ? addDays(anchor, -7) : monthAnchor(year, month - 1));
+  const next = () =>
+    setAnchor(view === "week" ? addDays(anchor, 7) : monthAnchor(year, month + 1));
+  const goToday = () => setAnchor(today);
+  const setView = (v: ViewMode) => void updateCalendar({ ...calendar, view: v });
+
+  // Drag the divider between the grid and the agenda; persist on release only.
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const row = rowRef.current;
+    if (!row) return;
+    const onMove = (ev: MouseEvent) => {
+      const rect = row.getBoundingClientRect();
+      setSplitPct(clampSplit(((ev.clientX - rect.left) / rect.width) * 100));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setSplitPct((p) => {
+        void updateCalendar({ ...calendar, splitPct: p });
+        return p;
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   };
-  const next = () => {
-    if (month === 11) { setYear(year + 1); setMonth(0); }
-    else setMonth(month + 1);
-  };
-  const goToday = () => { setYear(now.getFullYear()); setMonth(now.getMonth()); };
 
   const toggleEvent = (id: string) =>
     void updateCalendar({
@@ -98,9 +166,7 @@ export function CalendarView() {
             <CalendarDays size={17} />
           </span>
           <div>
-            <h1 className="text-base font-semibold leading-tight">
-              {MONTHS[month]} {year}
-            </h1>
+            <h1 className="text-base font-semibold leading-tight">{title}</h1>
             <p className="text-xs text-muted">
               {loading
                 ? "Loading items…"
@@ -111,6 +177,21 @@ export function CalendarView() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-lg border border-line p-0.5">
+            {(["week", "month"] as ViewMode[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`rounded-md px-2.5 py-1 text-sm font-medium capitalize transition-colors ${
+                  view === v
+                    ? "bg-accent text-accent-fg"
+                    : "text-muted hover:text-fg"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
           <button
             onClick={goToday}
             className="rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-accent hover:text-accent"
@@ -120,14 +201,14 @@ export function CalendarView() {
           <div className="flex items-center rounded-lg border border-line">
             <button
               onClick={prev}
-              aria-label="Previous month"
+              aria-label={view === "week" ? "Previous week" : "Previous month"}
               className="rounded-l-lg px-2 py-1.5 text-muted transition-colors hover:bg-raised hover:text-fg"
             >
               <ChevronLeft size={16} />
             </button>
             <button
               onClick={next}
-              aria-label="Next month"
+              aria-label={view === "week" ? "Next week" : "Next month"}
               className="rounded-r-lg px-2 py-1.5 text-muted transition-colors hover:bg-raised hover:text-fg"
             >
               <ChevronRight size={16} />
@@ -142,36 +223,52 @@ export function CalendarView() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
-        {/* Left: month grid */}
-        <div className="flex min-h-0 flex-col border-b border-line p-5 md:w-[55%] md:border-b-0 md:border-r">
-          {/* Weekday header */}
-          <div className="grid grid-cols-7 border-b border-line">
-            {WEEKDAYS.map((d) => (
-              <div key={d} className="px-2 py-1.5 text-xs font-medium text-muted">
-                {d}
-              </div>
-            ))}
-          </div>
-          {/* Day grid */}
-          <div className="grid min-h-0 flex-1 auto-rows-[minmax(4.5rem,1fr)] grid-cols-7 overflow-auto">
-            {cells.map((date) => (
-              <DayCell
-                key={date}
-                date={date}
-                inMonth={date.startsWith(monthKey)}
-                isToday={date === today}
-                selected={date === selectedDate}
-                entries={byDate.get(date) ?? []}
-                onSelect={() => setSelectedDate(date)}
-                onAdd={() => setAddFor(date)}
-                onOpenItem={selectFile}
-                onToggleEvent={toggleEvent}
-                onDeleteEvent={deleteEvent}
-              />
-            ))}
-          </div>
+      <div
+        ref={rowRef}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row"
+      >
+        {/* Left: the grid (week or month) */}
+        <div
+          className="flex min-h-0 flex-col border-b border-line p-5 md:border-b-0"
+          style={isWide ? { width: `${splitPct}%` } : undefined}
+        >
+          {view === "week" ? (
+            <WeekGrid
+              cells={cells}
+              today={today}
+              selectedDate={selectedDate}
+              byDate={byDate}
+              onSelect={setSelectedDate}
+              onAdd={setAddFor}
+              onOpenItem={selectFile}
+              onToggleEvent={toggleEvent}
+              onDeleteEvent={deleteEvent}
+            />
+          ) : (
+            <MonthGrid
+              cells={cells}
+              monthKey={monthKey}
+              today={today}
+              selectedDate={selectedDate}
+              byDate={byDate}
+              onAdd={setAddFor}
+              onOpenDay={(date, rect) => {
+                setSelectedDate(date);
+                setPopover({ date, rect });
+              }}
+            />
+          )}
         </div>
+
+        {/* Draggable divider (desktop only) */}
+        {isWide && (
+          <div
+            onMouseDown={startDrag}
+            role="separator"
+            aria-orientation="vertical"
+            className="w-1.5 shrink-0 cursor-col-resize bg-line/60 transition-colors hover:bg-accent"
+          />
+        )}
 
         {/* Right: upcoming agenda */}
         <UpcomingList
@@ -207,43 +304,172 @@ export function CalendarView() {
           onCreateItem={(name) => { void createItem(addFor, name); setAddFor(null); }}
         />
       )}
+
+      {popover && (
+        <DayPopover
+          date={popover.date}
+          rect={popover.rect}
+          today={today}
+          entries={byDate.get(popover.date) ?? []}
+          onClose={() => setPopover(null)}
+          onOpenItem={selectFile}
+          onToggleEvent={toggleEvent}
+          onDeleteEvent={deleteEvent}
+          onAdd={() => { setAddFor(popover.date); setPopover(null); }}
+        />
+      )}
     </div>
   );
 }
 
-function DayCell({
-  date,
-  inMonth,
-  isToday,
-  selected,
-  entries,
+function WeekGrid({
+  cells,
+  today,
+  selectedDate,
+  byDate,
   onSelect,
   onAdd,
   onOpenItem,
   onToggleEvent,
   onDeleteEvent,
 }: {
+  cells: string[];
+  today: string;
+  selectedDate: string | null;
+  byDate: Map<string, CalEntry[]>;
+  onSelect: (date: string) => void;
+  onAdd: (date: string) => void;
+  onOpenItem: (path: string) => void;
+  onToggleEvent: (id: string) => void;
+  onDeleteEvent: (id: string) => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 overflow-x-auto rounded-lg border border-line">
+      {cells.map((date, i) => {
+        const entries = byDate.get(date) ?? [];
+        const isToday = date === today;
+        const selected = date === selectedDate;
+        const dayNum = Number(date.slice(8, 10));
+        return (
+          <div
+            key={date}
+            onClick={() => onSelect(date)}
+            className={`group flex min-w-[11rem] flex-1 cursor-pointer flex-col border-r border-line last:border-r-0 ${
+              selected ? "bg-accent-soft/30" : ""
+            }`}
+          >
+            <div className="flex items-center justify-between border-b border-line px-2 py-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-medium text-muted">
+                  {WEEKDAYS[i]}
+                </span>
+                <span
+                  className={`grid h-6 w-6 place-items-center rounded-full text-xs ${
+                    isToday
+                      ? "bg-accent font-semibold text-accent-fg"
+                      : "text-fg"
+                  }`}
+                >
+                  {dayNum}
+                </span>
+              </div>
+              <button
+                onClick={stop(() => onAdd(date))}
+                aria-label={`Add to ${date}`}
+                className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-raised hover:text-fg group-hover:opacity-100"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1.5">
+              {entries.map((entry, j) => (
+                <EntryRow
+                  key={
+                    entry.kind === "item"
+                      ? `i-${entry.path}-${entry.field}`
+                      : `e-${entry.event.id}-${j}`
+                  }
+                  entry={entry}
+                  onOpenItem={(p) => stop(() => onOpenItem(p))}
+                  onToggleEvent={(id) => stop(() => onToggleEvent(id))}
+                  onDeleteEvent={(id) => stop(() => onDeleteEvent(id))}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MonthGrid({
+  cells,
+  monthKey,
+  today,
+  selectedDate,
+  byDate,
+  onAdd,
+  onOpenDay,
+}: {
+  cells: string[];
+  monthKey: string;
+  today: string;
+  selectedDate: string | null;
+  byDate: Map<string, CalEntry[]>;
+  onAdd: (date: string) => void;
+  onOpenDay: (date: string, rect: DOMRect) => void;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-7 border-b border-line">
+        {WEEKDAYS.map((d) => (
+          <div key={d} className="px-2 py-1.5 text-xs font-medium text-muted">
+            {d}
+          </div>
+        ))}
+      </div>
+      <div className="grid min-h-0 flex-1 auto-rows-[minmax(4.5rem,1fr)] grid-cols-7 overflow-auto">
+        {cells.map((date) => (
+          <MonthCell
+            key={date}
+            date={date}
+            inMonth={date.startsWith(monthKey)}
+            isToday={date === today}
+            selected={date === selectedDate}
+            entries={byDate.get(date) ?? []}
+            onAdd={() => onAdd(date)}
+            onOpenDay={onOpenDay}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function MonthCell({
+  date,
+  inMonth,
+  isToday,
+  selected,
+  entries,
+  onAdd,
+  onOpenDay,
+}: {
   date: string;
   inMonth: boolean;
   isToday: boolean;
   selected: boolean;
   entries: CalEntry[];
-  onSelect: () => void;
   onAdd: () => void;
-  onOpenItem: (path: string) => void;
-  onToggleEvent: (id: string) => void;
-  onDeleteEvent: (id: string) => void;
+  onOpenDay: (date: string, rect: DOMRect) => void;
 }) {
   const dayNum = Number(date.slice(8, 10));
-  // Inner controls (open / toggle / delete / add) shouldn't also re-select the day.
-  const stop =
-    (fn: () => void) => (e: React.MouseEvent) => {
-      e.stopPropagation();
-      fn();
-    };
+  const dots = entries.slice(0, 4);
+  const extra = entries.length - dots.length;
   return (
     <div
-      onClick={onSelect}
+      onClick={(e) => onOpenDay(date, e.currentTarget.getBoundingClientRect())}
       className={`group flex cursor-pointer flex-col gap-1 border-b border-r border-line p-1.5 ${
         inMonth ? "" : "bg-raised/30 text-muted"
       } ${selected ? "ring-1 ring-inset ring-accent" : ""}`}
@@ -260,26 +486,118 @@ function DayCell({
         >
           {dayNum}
         </span>
-        <button
-          onClick={stop(onAdd)}
-          aria-label={`Add to ${date}`}
-          className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-raised hover:text-fg group-hover:opacity-100"
-        >
-          <Plus size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          {entries.length > 0 && (
+            <span className="rounded-full bg-accent-soft px-1.5 text-[10px] font-semibold leading-4 text-accent-soft-fg">
+              {entries.length}
+            </span>
+          )}
+          <button
+            onClick={stop(onAdd)}
+            aria-label={`Add to ${date}`}
+            className="rounded p-0.5 text-muted opacity-0 transition-opacity hover:bg-raised hover:text-fg group-hover:opacity-100"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
-      <div className="flex flex-col gap-0.5">
-        {entries.map((entry, i) => (
-          <EntryRow
-            key={entry.kind === "item" ? `i-${entry.path}-${entry.field}` : `e-${entry.event.id}-${i}`}
-            entry={entry}
-            onOpenItem={(p) => stop(() => onOpenItem(p))}
-            onToggleEvent={(id) => stop(() => onToggleEvent(id))}
-            onDeleteEvent={(id) => stop(() => onDeleteEvent(id))}
-          />
-        ))}
-      </div>
+      {entries.length > 0 && (
+        <div className="mt-auto flex flex-wrap items-center gap-1">
+          {dots.map((entry, i) => (
+            <span
+              key={i}
+              className={`h-1.5 w-1.5 rounded-full ${dotClass(entry)}`}
+            />
+          ))}
+          {extra > 0 && <span className="text-[10px] text-muted">+{extra}</span>}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Floating detail for a clicked month-grid day; positioned near the cell. */
+function DayPopover({
+  date,
+  rect,
+  today,
+  entries,
+  onClose,
+  onOpenItem,
+  onToggleEvent,
+  onDeleteEvent,
+  onAdd,
+}: {
+  date: string;
+  rect: DOMRect;
+  today: string;
+  entries: CalEntry[];
+  onClose: () => void;
+  onOpenItem: (path: string) => void;
+  onToggleEvent: (id: string) => void;
+  onDeleteEvent: (id: string) => void;
+  onAdd: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Plain handlers (the popover isn't a clickable surface that needs stopPropagation).
+  const open = (p: string) => () => onOpenItem(p);
+  const toggle = (id: string) => () => onToggleEvent(id);
+  const del = (id: string) => () => onDeleteEvent(id);
+
+  const width = 240;
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  const top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 300));
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[55]" onMouseDown={onClose} />
+      <div
+        className="fixed z-[60] flex max-h-72 flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-xl"
+        style={{ top, left, width }}
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+          <h3
+            className={`text-xs font-semibold uppercase tracking-wide ${
+              date === today ? "text-accent" : "text-muted"
+            }`}
+          >
+            {dayLabel(date, today)}
+          </h3>
+          <button
+            onClick={onAdd}
+            aria-label={`Add to ${date}`}
+            className="rounded p-0.5 text-muted transition-colors hover:bg-raised hover:text-fg"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+        <div className="flex flex-col gap-1 overflow-y-auto p-2">
+          {entries.length === 0 ? (
+            <p className="px-1 py-2 text-xs text-muted">Nothing scheduled.</p>
+          ) : (
+            entries.map((entry, i) => (
+              <EntryRow
+                key={
+                  entry.kind === "item"
+                    ? `i-${entry.path}-${entry.field}`
+                    : `e-${entry.event.id}-${i}`
+                }
+                entry={entry}
+                onOpenItem={open}
+                onToggleEvent={toggle}
+                onDeleteEvent={del}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    </>,
+    document.body,
   );
 }
 

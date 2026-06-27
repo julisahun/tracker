@@ -23,10 +23,16 @@ export interface CalEvent {
   done?: boolean;
 }
 
+export type CalendarView = "week" | "month";
+
 export interface Calendar {
   /** Schema field keys to project onto the calendar; empty ⇒ all `date` fields. */
   dateFields: string[];
   events: CalEvent[];
+  /** Which grid to show. Defaults to "week". */
+  view?: CalendarView;
+  /** Width % of the grid pane (the rest goes to the agenda). Defaults to 55. */
+  splitPct?: number;
 }
 
 /** One thing happening on a day: either a dated item or a standalone event. */
@@ -41,7 +47,13 @@ export interface Item {
 }
 
 export function defaultCalendar(): Calendar {
-  return { dateFields: [], events: [] };
+  return { dateFields: [], events: [], view: "week", splitPct: 55 };
+}
+
+/** Clamp a stored split ratio into a sane range. */
+export function clampSplit(pct: number): number {
+  if (!Number.isFinite(pct)) return 55;
+  return Math.min(80, Math.max(30, pct));
 }
 
 // ---- Pure helpers (today injected; unit-tested) ------------------------
@@ -213,6 +225,29 @@ export function monthMatrix(year: number, month: number): string[] {
   return cells;
 }
 
+/** The 7 `YYYY-MM-DD` dates (Monday-first) of the week containing `anchor`. */
+export function weekMatrix(anchor: string): string[] {
+  const [y, m, d] = anchor.split("-").map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 Sun..6 Sat
+  const offset = (weekday + 6) % 7; // days since Monday
+  const monday = addDays(anchor, -offset);
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
+/** Header label for a week's dates, e.g. "Jun 23 – 29, 2026", collapsing the
+ *  shared month/year and expanding both sides when the week spans a boundary. */
+export function weekRangeLabel(dates: string[]): string {
+  const first = dates[0];
+  const last = dates[dates.length - 1];
+  const [y1, m1, d1] = first.split("-").map(Number);
+  const [y2, m2, d2] = last.split("-").map(Number);
+  const M1 = MONTH_NAMES[m1 - 1];
+  const M2 = MONTH_NAMES[m2 - 1];
+  if (y1 !== y2) return `${M1} ${d1}, ${y1} – ${M2} ${d2}, ${y2}`;
+  if (m1 !== m2) return `${M1} ${d1} – ${M2} ${d2}, ${y2}`;
+  return `${M1} ${d1} – ${d2}, ${y2}`;
+}
+
 /** Today as a local `YYYY-MM-DD` (matches what the native date input writes).
  *  Date is injectable for tests; the default uses the real clock. */
 export function todayStr(d: Date = new Date()): string {
@@ -250,6 +285,9 @@ export async function loadCalendar(
       return {
         dateFields: Array.isArray(parsed.dateFields) ? parsed.dateFields : [],
         events: parsed.events,
+        view: parsed.view === "month" ? "month" : "week",
+        splitPct:
+          typeof parsed.splitPct === "number" ? clampSplit(parsed.splitPct) : 55,
       };
     }
   } catch {
